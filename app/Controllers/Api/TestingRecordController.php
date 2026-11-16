@@ -1,0 +1,837 @@
+<?php
+
+namespace App\Controllers\Api;
+
+use App\Controllers\BaseController;
+use App\Models\AuditLog;
+use App\Models\Appointment;
+use App\Models\Document;
+use App\Models\TestingRecord;
+use App\Models\User;
+use App\Notifications\ParReadyNotification;
+use App\Notifications\ParScheduledNotification;
+use App\Notifications\TesterAssignedNotification;
+use App\Notifications\TestingAppointmentReadyNotification;
+use App\Notifications\TestingRequestSubmittedNotification;
+use App\Notifications\TestingScheduledNotification;
+use Illuminate\Http\Request;
+use App\Notifications\ParOnHoldNotification;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Storage;
+
+class TestingRecordController extends BaseController
+{
+    // Reminder text shown to the student both in the notification and on the
+    // appointment's "Required Documents" block (Appointment.required_documents),
+    // so it shows up with zero extra frontend work.
+    protected const TESTING_REMINDER = "Please bring your Official Receipt (OR), two (2) sharpened pencils with eraser, and arrive at least 15 minutes before your scheduled exam time.";
+
+    // Every staff-side action on a testing record - acknowledging it,
+    // scheduling, administering, issuing results - requires a psychometrician
+    // (TMDU staff or head) to already be assigned. Nothing should happen to a
+    // record that's just sitting in TMDU's queue unowned; whoever picks it up
+    // has to claim it via assign() first. Viewing, the student-facing
+    // requestTestingByStudent(), and assign() itself are exempt.
+    // A notification (mail/database) failing must never turn a successful
+    // action into a 500 - e.g. Reassign Test Administrator used to fail
+    // outright whenever the mail channel couldn't deliver.
+    private function safeNotify($notifiables, $notification): void
+    {
+        try {
+            Notification::send($notifiables, $notification);
+        } catch (\Throwable $e) {
+            Log::error('Notification failed: ' . $e->getMessage(), ['notification' => get_class($notification)]);
+        }
+    }
+
+    // Appointments belong to a specific referral (this record's own Case
+    // Referral Slip). Older rows with no referral_id fall back to the case.
+    private function recordAppointments(TestingRecord $record, string $type)
+    {
+        return Appointment::where('case_id', $record->case_id)
+            ->where('appointment_type', $type)
+            ->where(fn($q) => $q->where('referral_id', $record->referral_id)->orWhereNull('referral_id'));
+    }
+
+    private function ensureTesterAssigned(TestingRecord $testingRecord, ?Request $request = null): void
+    {
+        if (!$testingRecord->assigned_tester_user_id) {
+            abort(422, 'Assign a tester to this record before making any changes.');
+        }
+        // B559: once reassigned away, the previous tester keeps read-only
+        // visibility (see index()'s scoping above) but can no longer act on
+        // it - re-claiming it back through assign() is still open to them.
+        if ($request && $testingRecord->previous_tester_user_id === $request->user()->id
+            && $testingRecord->assigned_tester_user_id !== $request->user()->id) {
+            abort(403, 'This record was reassigned to someone else. You can still view it, but changes are no longer allowed.');
+        }
+    }
+
+    // Populates the "Assign Tester" control on the Testing Record Details
+    // page. Deliberately not admin-only like the main Users list - any TMDU
+    // staff/head needs to see the roster to claim or hand off a record.
+    public function availableTesters()
+    {
+        return response()->json(
+            User::whereIn('role', ['tmdu_staff', 'tmdu_head'])
+                ->where('is_active', true)
+                ->orderBy('name')
+                ->get(['id', 'name', 'role'])
+        );
+    }
+
+    // Claims (or reassigns) the psychometrician responsible for this record.
+    // This is the one action exempt from ensureTesterAssigned() - it's what
+    // unblocks everything else.
+    public function assign(Request $request, TestingRecord $testingRecord)
+    {
+        $validated = $request->validate([
+            'tester_user_id' => 'required|exists:users,id',
+        ]);
+
+        $tester = User::findOrFail($validated['tester_user_id']);
+        abort_unless(
+            in_array($tester->role, ['tmdu_staff', 'tmdu_head'], true),
+            422,
+            'The selected user is not TMDU staff.'
+        );
+
+        $old = ['assigned_tester_user_id' => $testingRecord->assigned_tester_user_id];
+
+        // B559: when this hands the record to someone else, keep the
+        // outgoing tester findable (read-only) instead of them losing the
+        // record from their queue entirely the moment it's reassigned.
+        $reassignedFrom = ($testingRecord->assigned_tester_user_id && $testingRecord->assigned_tester_user_id !== $tester->id)
+            ? $testingRecord->assigned_tester_user_id
+            : $testingRecord->previous_tester_user_id;
+
+        $testingRecord->update([
+            'assigned_tester_user_id' => $tester->id,
+            'previous_tester_user_id' => $reassignedFrom,
+        ]);
+
+        AuditLog::record(
+            'tester_assigned',
+            "Assigned {$tester->name} as tester for testing record #{$testingRecord->id}.",
+            $testingRecord,
+            $old
+        );
+
+        $this->safeNotify($tester, new TesterAssignedNotification($testingRecord));
+
+        return response()->json($testingRecord->load('tester'));
+    }
+
+    /**
+     * Step 1: TMDU acknowledges the GCU->TMDU referral. This is now normally
+     * handled by ReferralController::acknowledge() instead (since referring
+     * to TMDU creates a real, shared Referral row) - this endpoint is kept
+     * as a fallback for TestingRecords that predate that change and have no
+     * referral_id. Just flips the status - there is no fee-form/OR step
+     * anymore, so an acknowledged record simply sits as "Pending" until TMDU
+     * directly schedules the test in scheduleTesting().
+     */
+    public function acknowledge(Request $request, TestingRecord $testingRecord)
+    {
+        $this->ensureTesterAssigned($testingRecord, $request);
+
+        $testingRecord->update(['status' => 'pending']);
+
+        AuditLog::record('acknowledged', "Acknowledged testing referral for record #{$testingRecord->id}.", $testingRecord);
+
+        if ($testingRecord->student) {
+            $this->safeNotify($testingRecord->student, new TestingAppointmentReadyNotification($testingRecord));
+        }
+
+        return response()->json([
+            'testing_record' => $testingRecord,
+        ]);
+    }
+
+    public function index(Request $request)
+    {
+        $user = $request->user();
+
+        $query = TestingRecord::with(['student', 'referredBy', 'tester', 'previousTester', 'case'])
+            ->when($request->status, fn($q) => $q->where('status', $request->status))
+            ->when($request->student_id, fn($q) => $q->where('student_id', $request->student_id))
+            // TMDU's Testing Records is where an acknowledged GCU referral
+            // lands: records assigned to this tester, plus unclaimed records
+            // whose referral TMDU has already acknowledged.
+            // B559: also keeps a record visible to the tester it was most
+            // recently reassigned AWAY from - the frontend treats it as
+            // read-only and labels it "Reassigned" by comparing
+            // previous_tester_user_id to the signed-in user - instead of it
+            // just disappearing from their queue.
+            //
+            // Bug (10/24/2026): the TMDU Head is the unit's master historical
+            // database, not a tester with their own personal queue - this
+            // per-tester narrowing must only apply to tmdu_staff. Without
+            // this isTMDUHead() carve-out, assigning/reassigning a record to
+            // someone other than the Head made it vanish from the Head's own
+            // list the moment it no longer matched their own id above.
+            ->when($user->isTMDUStaff() && !$user->isTMDUHead(), fn($q) => $q->where(function ($qq) use ($user) {
+                $qq->where('assigned_tester_user_id', $user->id)
+                   ->orWhere('previous_tester_user_id', $user->id)
+                   ->orWhere(function ($un) {
+                       $un->whereNull('assigned_tester_user_id')
+                          ->whereHas('referral', fn($r) => $r->whereNotNull('acknowledged_at'));
+                   });
+            }));
+
+        // B#, 11/5/2026: hardcoded to 20 with no per_page support - the
+        // frontend never sent a page param either, so this silently showed
+        // only the newest 20 records with no way to reach anything older.
+        // Now accepts per_page like the other list endpoints (clamped the
+        // same way CaseReferralController does).
+        $perPage = min(max((int) $request->input('per_page', 20), 1), 200);
+
+        // The sidebar's Pending/In Progress/Completed stat tiles used to be
+        // counted client-side off whatever page happened to be loaded -
+        // harmless back when that was silently always-page-1-of-20, but
+        // genuinely wrong once this list is properly paginated at a smaller
+        // page size (a 5-per-page view would show "2 pending" even with 40
+        // actually pending). Counted here instead, off the same filtered
+        // query before pagination narrows it to one page.
+        $statusCounts = (clone $query)->selectRaw('status, count(*) as c')->groupBy('status')->pluck('c', 'status');
+
+        $response = $query->latest()->paginate($perPage)->toArray();
+        $response['status_counts'] = $statusCounts;
+
+        return response()->json($response);
+    }
+
+    // Loads everything the Testing Record Details page needs in one call:
+    // the GCU-authored referral this record was created from (mirroring how
+    // ReferralController::show() loads it for an Incident Report), plus the
+    // usual student/tester/case/document relations.
+    public function show(TestingRecord $testingRecord)
+    {
+        AuditLog::record('viewed', "Viewed testing record #{$testingRecord->id}.", $testingRecord);
+
+        $data = $testingRecord->load([
+            'student',
+            'referredBy',
+            'tester',
+            'previousTester',
+            'case',
+            // B#, 11/4/2026: `content` (base64 file bytes, can be several
+            // MB) is hidden from JSON via each model's $hidden, but that
+            // doesn't stop select(*) from pulling it off the DB on every
+            // Testing Record view. Neither of these relations' bytes are
+            // read here or on the frontend - the file is served
+            // separately through its own dedicated download route.
+            'documents' => fn($q) => $q->select([
+                'id', 'documentable_type', 'documentable_id', 'original_filename',
+                'document_type', 'mime_type', 'file_size', 'description',
+                'is_confidential', 'uploaded_by_user_id', 'created_at',
+            ]),
+            'referral.complaint.complainee',
+            'referral.complaint.filedBy',
+            'referral.complaint.attachments' => fn($q) => $q->select(['id', 'complaint_id', 'category', 'original_filename', 'mime_type']),
+            'referral.case',
+            // Testing Action / Appointments panel on the Testing Record
+            // Details page - every appointment sharing this record's case_id
+            // (TestingRecord::appointments()), same pattern as CaseFile's.
+            'appointments' => fn($q) => $q
+                ->where(fn($w) => $w->where('referral_id', $testingRecord->referral_id)->orWhereNull('referral_id')),
+            'appointments.staff',
+        ])->toArray();
+
+        // The GCU referral this testing request came from - TMDU gets only
+        // the parts it needs to do the testing. The full referral, the SIF,
+        // notes, interventions and GCU appointments stay with GCU.
+        $source = $testingRecord->sourceReferral;
+        $data['source_referral'] = $source
+            ? $source->only([
+                'referral_code', 'referral_type', 'nature_of_concern', 'urgency_level',
+                'incident_description', 'created_at', 'referrer_name', 'referrer_role',
+            ])
+            : null;
+
+        return response()->json($data);
+    }
+
+    // Streams the student's uploaded OR photo back to staff. Kept off the
+    // Document system (Document.uploaded_by_user_id is a required staff FK,
+    // which a student upload can't satisfy) - it's stored directly on
+    // TestingRecord instead, so this is its own small endpoint.
+    public function orPhoto(TestingRecord $testingRecord)
+    {
+        if ($testingRecord->or_photo_disk === 'cloudinary' && $testingRecord->or_photo_cloud_public_id) {
+            $bytes = app(\App\Support\CloudinaryClient::class)->fetch(
+                $testingRecord->or_photo_cloud_public_id,
+                $testingRecord->or_photo_cloud_resource_type ?: 'image'
+            );
+
+            return response($bytes, 200, [
+                'Content-Type'        => 'image/jpeg',
+                'Content-Disposition' => 'inline; filename="' . ($testingRecord->or_photo_original_name ?: 'or-photo.jpg') . '"',
+            ]);
+        }
+
+        abort_unless(
+            $testingRecord->or_photo_path && Storage::disk('local')->exists($testingRecord->or_photo_path),
+            404,
+            'No OR photo has been uploaded for this record.'
+        );
+
+        return Storage::disk('local')->response(
+            $testingRecord->or_photo_path,
+            $testingRecord->or_photo_original_name ?: 'or-photo.jpg'
+        );
+    }
+
+    public function update(Request $request, TestingRecord $testingRecord)
+    {
+        // Once the PAR/report has been issued to GCU, the record is final -
+        // this is the same lock the frontend enforces by disabling the
+        // fields, but that's UX only; a direct API call must be refused too,
+        // or the report could be silently rewritten after the fact.
+        if ($testingRecord->status === 'test_results_issued') {
+            abort(422, 'This testing record has already been issued to GCU and can no longer be edited.');
+        }
+        $this->ensureTesterAssigned($testingRecord, $request);
+
+        $validated = $request->validate([
+            'assigned_tester_user_id' => 'nullable|exists:users,id',
+            'tests_administered'      => 'nullable|array',
+            'testing_date'            => 'nullable|date',
+            'report_date'             => 'nullable|date',
+            'assessment_summary'      => 'nullable|string|max:3000',
+            'findings'                => 'nullable|string|max:3000',
+            'recommendations'         => 'nullable|string|max:3000',
+        ]);
+
+        $old = $testingRecord->toArray();
+        $testingRecord->update($validated);
+        AuditLog::record('updated', "Updated testing record #{$testingRecord->id}.", $testingRecord, $old, $testingRecord->toArray());
+        return response()->json($testingRecord);
+    }
+
+    // General-purpose status setter - kept only for early-stage manual
+    // corrections (e.g. undoing an accidental "Confirm Testing Schedule").
+    // It deliberately does NOT allow setting 'awaiting_results' or
+    // 'test_results_issued': those stages have real preconditions attached
+    // (schedulePar()'s test-taking attendance gate, and sendToGcu()/
+    // attachPar()'s PAR/assessment-summary requirement) that this endpoint
+    // has no way to also check, so allowing it to set them directly would
+    // let staff skip straight to "Results Released" with the student never
+    // having attended anything. Use scheduleTesting() / administerTests() /
+    // schedulePar() / sendToGcu() to reach those stages instead - nothing
+    // in the current UI calls this for anything past 'test_administered'.
+    public function updateStatus(Request $request, TestingRecord $testingRecord)
+    {
+        // Same lock as update() - once results are issued, staff can't loop
+        // the status back to an earlier stage from this endpoint to reopen
+        // editing on the record.
+        if ($testingRecord->status === 'test_results_issued') {
+            abort(422, 'This testing record has already been issued to GCU and can no longer be edited.');
+        }
+        $this->ensureTesterAssigned($testingRecord, $request);
+
+        $request->validate([
+            // Only the early, precondition-free stages are settable here.
+            // Legacy values (fee_form_pending, or_submitted, in_progress,
+            // par_scheduled) are accepted too, so an older record can still
+            // be corrected back to whichever equivalent stage it used to
+            // have, but nothing here ever writes those values going
+            // forward - see the controller notes above and in Index.vue.
+            'status' => 'required|in:pending,fee_form_pending,or_submitted,scheduled,in_progress,test_administered'
+        ]);
+
+        $old = ['status' => $testingRecord->status];
+        $testingRecord->update(['status' => $request->status]);
+        AuditLog::record('status_updated', "Updated testing record #{$testingRecord->id} status to {$request->status}.", $testingRecord, $old);
+        return response()->json($testingRecord);
+    }
+
+    /**
+     * Step 2 (student side): after picking up the Assessment of Fees form
+     * and paying, the student uploads a photo of their OR and requests a
+     * testing schedule. They do NOT pick a date/time - TMDU sets that next
+     * in scheduleTesting(). Guarded by auth:student.
+     */
+    public function requestTestingByStudent(Request $request, TestingRecord $testingRecord)
+    {
+        abort_if($testingRecord->student_id !== $request->user()->id, 403, 'This testing record does not belong to you.');
+
+        $request->validate([
+            'or_photo' => 'required|image|max:5120',
+        ]);
+
+        $file = $request->file('or_photo');
+
+        try {
+            $cloud = app(\App\Support\CloudinaryClient::class)->upload($file->getRealPath(), 'testing-or-photos');
+        } catch (\Throwable $e) {
+            Log::error('OR photo upload to Cloudinary failed', ['error' => $e->getMessage()]);
+            return response()->json(['message' => 'The photo could not be uploaded right now. Please try again in a moment.'], 502);
+        }
+
+        $testingRecord->update([
+            'status'                       => 'or_submitted',
+            'or_photo_path'                => null,
+            'or_photo_disk'                => 'cloudinary',
+            'or_photo_cloud_public_id'     => $cloud['public_id'],
+            'or_photo_cloud_resource_type' => $cloud['resource_type'],
+            'or_photo_original_name'       => $file->getClientOriginalName(),
+            'or_uploaded_at'               => now(),
+        ]);
+
+        AuditLog::record('or_submitted', "Student submitted OR and requested testing schedule for record #{$testingRecord->id}.", $testingRecord);
+
+        // Notify whoever's already assigned as tester, or fall back to every
+        // TMDU staff member if no one's been assigned yet.
+        $recipients = $testingRecord->tester
+            ? collect([$testingRecord->tester])
+            : User::whereIn('role', ['tmdu_staff', 'tmdu_head'])->get();
+
+        if ($recipients->isNotEmpty()) {
+            $this->safeNotify($recipients, new TestingRequestSubmittedNotification($testingRecord));
+        }
+
+        return response()->json($testingRecord);
+    }
+
+    /**
+     * "Schedule Test Taking": TMDU staff sets (and confirms) the actual
+     * testing appointment directly - the student does not self-schedule
+     * this. Available once the record is "Pending" (right after Acknowledge,
+     * no fee-form/OR step in between). Sends the student the pencils/arrival
+     * reminder (TESTING_REMINDER) and moves the record to "Scheduled for
+     * Testing".
+     */
+    public function scheduleTesting(Request $request, TestingRecord $testingRecord)
+    {
+        $this->ensureTesterAssigned($testingRecord, $request);
+
+        // Scheduling (and Reschedule) only makes sense before the tests are
+        // given; once the student has attended, the date is fixed.
+        if (in_array($testingRecord->status, ['test_administered', 'awaiting_results', 'par_scheduled', 'test_results_issued'], true)) {
+            abort(422, 'Test taking can only be scheduled or rescheduled before the tests are administered.');
+        }
+        if ($this->recordAppointments($testingRecord, 'psychological_testing')->where('checked_in', true)->exists()) {
+            abort(422, 'The student already attended the test-taking appointment, so it can no longer be rescheduled.');
+        }
+
+        $validated = $request->validate([
+            'appointment_date' => 'required|date',
+            'start_time'       => 'required',
+            'end_time'         => 'required',
+        ]);
+
+        \App\Support\BlockedDates::assertOpen($validated['appointment_date']);
+
+        $appointment = $this->recordAppointments($testingRecord, 'psychological_testing')
+            ->whereNotIn('status', ['cancelled', 'completed', 'no_show'])
+            ->latest()
+            ->first();
+
+        // An open test-taking appointment already exists -> this is a reschedule.
+        $isReschedule = (bool) $appointment;
+
+        $attributes = [
+            'case_id'             => $testingRecord->case_id,
+            'referral_id'         => $testingRecord->referral_id,
+            'student_id'          => $testingRecord->student_id,
+            'staff_user_id'       => $request->user()->id,
+            'created_by_user_id'  => $request->user()->id,
+            'appointment_type'    => 'psychological_testing',
+            'unit'                => 'TMDU',
+            'appointment_date'    => $validated['appointment_date'],
+            'start_time'          => $validated['start_time'],
+            'end_time'            => $validated['end_time'],
+            // Pending, not confirmed - TMDU set this date directly with the
+            // student face-to-face (never self-scheduled, so request_status
+            // stays 'confirmed' to keep it out of the awaiting-student UI),
+            // but it only becomes a settled outcome (attended/no-show/etc.)
+            // after that appointment actually happens.
+            'status'              => 'pending',
+            'request_status'      => 'confirmed',
+            'required_documents'  => self::TESTING_REMINDER,
+        ];
+
+        if ($appointment) {
+            $appointment->update($attributes);
+        } else {
+            $appointment = Appointment::create($attributes);
+        }
+
+        $testingRecord->update([
+            'status'       => 'scheduled',
+            'testing_date' => $validated['appointment_date'],
+        ]);
+
+        AuditLog::record('testing_scheduled', "Scheduled psychological testing for record #{$testingRecord->id}.", $testingRecord);
+
+        if ($testingRecord->student) {
+            $this->safeNotify($testingRecord->student, new TestingScheduledNotification($testingRecord, $appointment, $isReschedule));
+        }
+
+        return response()->json([
+            'testing_record' => $testingRecord,
+            'appointment'    => $appointment,
+        ]);
+    }
+
+    /**
+     * "Psychological Tests Administered" action on the Testing Record
+     * Details page. Records which tests were given and when, and moves the
+     * record to its own resting status, "Test Administered" - separate from
+     * "Awaiting Results", which now only happens once PAR release is
+     * actually scheduled (see schedulePar()).
+     */
+    public function administerTests(Request $request, TestingRecord $testingRecord)
+    {
+        $this->ensureTesterAssigned($testingRecord, $request);
+
+        // Bug (11/5/2026): this had no attendance check at all - tests
+        // could be recorded as administered even if the student never
+        // showed up to the scheduled test-taking appointment. schedulePar()
+        // already guards on this same check; apply it here too, one step
+        // earlier, so "administered" can't be saved before the student is
+        // actually marked attended (AppointmentController::checkIn()).
+        $testAppointment = $this->recordAppointments($testingRecord, 'psychological_testing')
+            ->whereNotIn('status', ['cancelled'])
+            ->latest()
+            ->first();
+        if (!$testAppointment || !$testAppointment->checked_in) {
+            abort(422, 'The student must be marked attended for the scheduled test-taking appointment before tests administered can be recorded.');
+        }
+
+        $validated = $request->validate([
+            'tests_administered' => 'required|array|min:1',
+            // The test-taking date is the one already set by Schedule Test
+            // Taking; recording the tests must not move it (use Reschedule).
+            'testing_date'       => [$testingRecord->testing_date ? 'nullable' : 'required', 'date'],
+        ]);
+
+        $old = $testingRecord->only(['tests_administered', 'testing_date', 'status']);
+
+        $testingRecord->update([
+            'tests_administered' => $validated['tests_administered'],
+            'testing_date'       => $testingRecord->testing_date ?: $validated['testing_date'],
+            'status'             => 'test_administered',
+        ]);
+
+        AuditLog::record(
+            'tests_administered',
+            "Recorded psychological tests administered for record #{$testingRecord->id}.",
+            $testingRecord,
+            $old,
+            $testingRecord->toArray()
+        );
+
+        return response()->json($testingRecord);
+    }
+
+    /**
+     * "Schedule PAR Release": after the exam, TMDU sets an appointment for
+     * when the student will receive their PAR (Psychological Assessment
+     * Report). Available once a record is "Test Administered" - and only
+     * once the student has actually attended the scheduled test-taking
+     * appointment; a test that was administered without that appointment
+     * being marked attended (AppointmentController::checkIn()) can't move
+     * forward. Moves the record to "Awaiting Results". This is not itself
+     * what moves it to "Results Released" (Attach PAR / sendToGcu() does).
+     */
+    public function schedulePar(Request $request, TestingRecord $testingRecord)
+    {
+        $this->ensureTesterAssigned($testingRecord, $request);
+
+        $testAppointment = $this->recordAppointments($testingRecord, 'psychological_testing')
+            ->whereNotIn('status', ['cancelled'])
+            ->latest()
+            ->first();
+
+        if (!$testAppointment || !$testAppointment->checked_in) {
+            abort(422, 'The student must have attended the scheduled test-taking appointment before PAR release can be scheduled.');
+        }
+
+        $validated = $request->validate([
+            'appointment_date' => 'required|date',
+            'start_time'       => 'required',
+            'end_time'         => 'required',
+        ]);
+
+        // PAR release can't be set earlier than the recorded test-taking date.
+        $testedOn = collect([$testAppointment->appointment_date, $testingRecord->testing_date])
+            ->filter()
+            ->map(fn ($d) => \Illuminate\Support\Carbon::parse($d)->toDateString())
+            ->max();
+        if ($testedOn && \Illuminate\Support\Carbon::parse($validated['appointment_date'])->toDateString() < $testedOn) {
+            abort(422, 'PAR release cannot be scheduled earlier than the test-taking date (' . \Illuminate\Support\Carbon::parse($testedOn)->format('F j, Y') . ').');
+        }
+
+        \App\Support\BlockedDates::assertOpen($validated['appointment_date']);
+
+        $appointment = $this->recordAppointments($testingRecord, 'par_release')
+            ->whereNotIn('status', ['cancelled', 'completed', 'no_show'])
+            ->latest()
+            ->first();
+
+        $attributes = [
+            'case_id'             => $testingRecord->case_id,
+            'referral_id'         => $testingRecord->referral_id,
+            'on_hold_at'          => null,
+            'student_id'          => $testingRecord->student_id,
+            'staff_user_id'       => $request->user()->id,
+            'created_by_user_id'  => $request->user()->id,
+            'appointment_type'    => 'par_release',
+            'unit'                => 'TMDU',
+            'appointment_date'    => $validated['appointment_date'],
+            'start_time'          => $validated['start_time'],
+            'end_time'            => $validated['end_time'],
+            // Same as scheduleTesting() - pending until the face-to-face
+            // release actually happens, never self-scheduled by the student.
+            'status'              => 'pending',
+            'request_status'      => 'confirmed',
+        ];
+
+        if ($appointment) {
+            $appointment->update($attributes);
+        } else {
+            $appointment = Appointment::create($attributes);
+        }
+
+        $testingRecord->update(['status' => 'awaiting_results']);
+
+        AuditLog::record('par_scheduled', "Scheduled PAR release for record #{$testingRecord->id}.", $testingRecord);
+
+        if ($testingRecord->student) {
+            $this->safeNotify($testingRecord->student, new ParScheduledNotification($testingRecord, $appointment));
+        }
+
+        return response()->json([
+            'testing_record' => $testingRecord,
+            'appointment'    => $appointment,
+        ]);
+    }
+
+    /**
+     * PAR Release appointment actions: Results Released, On Hold, Cancel.
+     * On Hold re-notifies the student to go and collect their PAR results.
+     */
+    public function parAction(Request $request, Appointment $appointment)
+    {
+        $validated = $request->validate([
+            'action'           => 'required|in:released,on_hold,cancel',
+            // Cancel only: a new date for the PAR to be released again.
+            'appointment_date' => 'nullable|required_with:start_time|date|after_or_equal:today',
+            'start_time'       => 'nullable|required_with:appointment_date|date_format:H:i',
+            'end_time'         => 'nullable|required_with:appointment_date|date_format:H:i|after:start_time',
+            'reason'           => 'nullable|string|max:500',
+        ]);
+
+        abort_unless($appointment->appointment_type === 'par_release' && $appointment->unit === 'TMDU', 422, 'This is not a PAR release appointment.');
+        abort_if(in_array($appointment->status, ['completed', 'cancelled'], true), 422, 'This PAR release is already ' . $appointment->status . '.');
+        if ($validated['action'] === 'cancel' && !empty($validated['appointment_date'])) {
+            \App\Support\BlockedDates::assertOpen($validated['appointment_date']);
+            if ((int) date('N', strtotime($validated['appointment_date'])) > 5) {
+                abort(422, 'TMDU is closed on weekends. Please choose Monday to Friday.');
+            }
+            if ($validated['start_time'] < '08:00' || $validated['end_time'] > '16:00') {
+                abort(422, 'PAR release can only be scheduled between 8:00 AM and 4:00 PM.');
+            }
+        }
+
+        $record = TestingRecord::where('case_id', $appointment->case_id)
+            ->where(fn($q) => $q->where('referral_id', $appointment->referral_id)->orWhereNull('referral_id'))
+            ->latest()
+            ->first();
+
+        switch ($validated['action']) {
+            case 'released':
+                $appointment->update(['status' => 'completed', 'request_status' => 'completed', 'on_hold_at' => null]);
+                $message = 'PAR marked as released. You can now attach the PAR results.';
+                break;
+
+            case 'on_hold':
+                abort_if($appointment->on_hold_at, 422, 'This PAR release is already on hold.');
+                $appointment->update(['on_hold_at' => now()]);
+                if ($appointment->student) {
+                    $this->safeNotify($appointment->student, new ParOnHoldNotification($appointment));
+                }
+                $message = 'PAR release put on hold. The student was notified to collect their PAR results.';
+                break;
+
+            default:
+                $appointment->update([
+                    'status'         => 'cancelled',
+                    'request_status' => 'cancelled',
+                    'cancelled_at'   => now(),
+                    'on_hold_at'     => null,
+                ]);
+                $message = 'PAR release cancelled. Schedule a new PAR release when ready.';
+                if (!empty($validated['reason'])) {
+                    $appointment->update(['cancellation_reason' => $validated['reason']]);
+                }
+
+                // "Schedule for Re-release of PAR": book the new release right away.
+                if (!empty($validated['appointment_date'])) {
+                    $rerelease = Appointment::create([
+                        'case_id'            => $appointment->case_id,
+                        'referral_id'        => $appointment->referral_id,
+                        'student_id'         => $appointment->student_id,
+                        'staff_user_id'      => $request->user()->id,
+                        'created_by_user_id' => $request->user()->id,
+                        'appointment_type'   => 'par_release',
+                        'unit'               => 'TMDU',
+                        'appointment_date'   => $validated['appointment_date'],
+                        'start_time'         => $validated['start_time'],
+                        'end_time'           => $validated['end_time'],
+                        'status'             => 'pending',
+                        'request_status'     => 'confirmed',
+                        'rescheduled_from_id' => $appointment->id,
+                    ]);
+                    if ($record && $record->student) {
+                        $this->safeNotify($record->student, new ParScheduledNotification($record, $rerelease));
+                    }
+                    AuditLog::record('par_scheduled', "Scheduled re-release of PAR ({$rerelease->appointment_code}) after cancelling {$appointment->appointment_code}.", $rerelease);
+                    $message = 'PAR release cancelled and re-release scheduled. The student was notified.';
+                }
+        }
+
+        AuditLog::record('par_release_' . $validated['action'], "PAR release {$validated['action']} for appointment {$appointment->appointment_code}.", $appointment);
+
+        return response()->json(['message' => $message, 'appointment' => $appointment->fresh(), 'testing_record' => $record]);
+    }
+
+    // "Attach Psychological Assessment Records (PAR)" action on the Testing
+    // Record Details page. Findings is now optional/unused by that panel
+    // (Assessment Summary + Recommended Actions only) but the column and
+    // validation stay nullable rather than removed, so older records/API
+    // callers that still send it keep working.
+    public function sendToGcu(Request $request, TestingRecord $testingRecord)
+    {
+        // Results can only be issued once a PAR is actually attached -
+        // without this, re-submitting would silently overwrite the report
+        // (and re-attach a new file over the original) after it's already
+        // gone out to GCU. A record that reached test_results_issued without
+        // ever getting a PAR document (e.g. an upload failure that happened
+        // after the status was already saved, since fixed) is NOT
+        // considered "already issued" here, so it can still be resubmitted.
+        $alreadyHasPar = $testingRecord->status === 'test_results_issued'
+            && $testingRecord->documents()->where('document_type', 'psychological_assessment_report')->exists();
+        if ($alreadyHasPar) {
+            abort(422, 'Test results have already been issued to GCU for this record.');
+        }
+        $this->ensureTesterAssigned($testingRecord, $request);
+
+        // The PAR can only be attached once the scheduled PAR release
+        // appointment has been marked "Results Released".
+        $released = $this->recordAppointments($testingRecord, 'par_release')
+            ->where('status', 'completed')
+            ->exists();
+        if (!$released) {
+            abort(422, 'PAR results can only be attached after the scheduled PAR release has been marked as Results Released.');
+        }
+
+        $request->validate([
+            'assessment_summary' => 'required|string|max:3000',
+            'findings'           => 'nullable|string|max:3000',
+            'recommendations'    => 'required|string|max:3000',
+            'report_file'        => 'nullable|file|max:10240',
+        ]);
+
+        // Upload the PAR file (if any) BEFORE touching the testing record at
+        // all. Doing this after marking results as released meant a failed
+        // Cloudinary upload still left the record showing "Results Released"
+        // with no PAR ever attached - results status and PAR attachment must
+        // succeed or fail together.
+        $cloud = null;
+        if ($request->hasFile('report_file')) {
+            $file = $request->file('report_file');
+
+            try {
+                $cloud = app(\App\Support\CloudinaryClient::class)->upload($file->getRealPath(), 'testing-reports');
+            } catch (\Throwable $e) {
+                Log::error('PAR upload to Cloudinary failed', ['error' => $e->getMessage()]);
+                return response()->json(['message' => 'The report file could not be uploaded right now. Please try again in a moment.'], 502);
+            }
+        }
+
+        $testingRecord->update([
+            ...$request->only(['assessment_summary', 'findings', 'recommendations']),
+            'status'             => 'test_results_issued',
+            'report_date'        => today(),
+            'report_sent_to_gcu' => true,
+            'report_sent_at'     => now(),
+        ]);
+
+        // B#, 11/5/2026: nothing in this record's whole lifecycle
+        // (scheduleTesting, requestTesting, etc.) ever touched the TMDU-owned
+        // Referral this testing record is actually filed under
+        // ($testingRecord->referral - the Case Referral Slip, see
+        // CaseController::escalateToTmdu()) - only TestingRecord::status
+        // moved. The referral itself could pick up 'scheduled' as a side
+        // effect of an unrelated appointment (AppointmentController sets it
+        // via case->latestReferral whenever any appointment on the case gets
+        // booked - this referral is usually the case's newest one once TMDU
+        // is involved) but then just sat there forever, stuck below
+        // "Completed" everywhere that referral's own status is read: the
+        // student's My Referrals list/detail page, the Dashboard, etc. - even
+        // though TMDU had already finished and released the PAR. Now that
+        // the PAR is actually out, the referral is done too.
+        $referral = $testingRecord->referral;
+        if ($referral && $referral->canMoveStatusTo('completed')) {
+            $referral->update(['status' => 'completed']);
+            AuditLog::record('status_changed', "Referral {$referral->referral_code} marked Completed: PAR released to GCU.", $referral);
+        }
+
+        // Link the uploaded PAR to both the testing record and its referral,
+        // so it shows up wherever either one is viewed. Prefer the referral
+        // this record was actually created from (referral_id); fall back to
+        // the case's latest referral for older records that predate that link.
+        if ($cloud) {
+            $file = $request->file('report_file');
+
+            $docBase = [
+                'document_type'       => 'psychological_assessment_report',
+                'disk'                => 'cloudinary',
+                'path'                => null,
+                'cloud_public_id'     => $cloud['public_id'],
+                'cloud_resource_type' => $cloud['resource_type'],
+                'cloud_format'        => $cloud['format'],
+                'stored_filename'     => $cloud['public_id'],
+                'original_filename'   => $file->getClientOriginalName(),
+                'mime_type'           => $file->getClientMimeType() ?: 'application/octet-stream',
+                'file_size'           => $file->getSize() ?: 0,
+                'is_confidential'     => true,
+                'uploaded_by_user_id' => $request->user()->id,
+            ];
+
+            Document::create($docBase + [
+                'documentable_type' => TestingRecord::class,
+                'documentable_id'   => $testingRecord->id,
+            ]);
+
+            // GCU never opens TMDU's own Case Referral Slip, so the PAR is
+            // also attached to the GCU referral this escalation started from.
+            $linkedReferral = $testingRecord->sourceReferral ?? $testingRecord->case?->latestReferral;
+            if ($linkedReferral) {
+                Document::create($docBase + [
+                    'documentable_type' => \App\Models\Referral::class,
+                    'documentable_id'   => $linkedReferral->id,
+                ]);
+            }
+        }
+
+        AuditLog::record('test_results_issued', "Test results issued to GCU for record #{$testingRecord->id}.", $testingRecord);
+
+        // Notify the original referring GCU counselor that the PAR is ready.
+        if ($testingRecord->referredBy) {
+            $this->safeNotify($testingRecord->referredBy, new ParReadyNotification($testingRecord));
+        }
+
+        // The student gets their own notice (in-app + email); their copy of
+        // the PAR is on the My Testing page.
+        if ($testingRecord->student) {
+            $this->safeNotify($testingRecord->student, new \App\Notifications\ParResultNotification($testingRecord));
+        }
+
+        return response()->json($testingRecord);
+    }
+}

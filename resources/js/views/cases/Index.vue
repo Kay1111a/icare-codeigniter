@@ -1,0 +1,192 @@
+<template>
+  <div class="fade-up">
+    <!-- Page Header -->
+    <div class="ph" style="margin-bottom:20px">
+      <h1>Student Information Files</h1>
+      <p>{{ filters.archived ? 'Archived files: closed cases and deactivated students. View only.' : "Each student's complete record in one place." }}</p>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+      <div class="sw">
+        <svg class="sw-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input
+          v-model="filters.search"
+          type="text"
+          class="sin"
+          maxlength="50"
+          placeholder="Search student name or case number..."
+          style="width:240px"
+          @keypress="blockSpecialKeypress"
+          @input="onSearchInput"
+        />
+      </div>
+      <select v-model="filters.status" class="fsm" :disabled="filters.archived" :title="filters.archived ? 'Status does not apply to archived records.' : ''" @change="fetchCases">
+        <option value="">All Status</option>
+        <option value="open">Open</option>
+        <option value="on_observation">On Observation</option>
+        <option value="resolved">Resolved</option>
+      </select>
+      <button
+      class="ibtn ibtn-sm"
+      :class="filters.severe ? '' : 'ibtn-o'"
+      :style="filters.severe ? 'background:var(--red-lt);color:var(--red);border:1.5px solid #f5c0c0' : ''"
+      @click="filters.severe = !filters.severe; fetchCases()"
+    >
+    Severe Cases
+    </button>
+      <button class="ibtn ibtn-o ibtn-sm" @click="resetFilters">Reset</button>
+      <button class="ibtn ibtn-sm" :class="filters.archived ? 'ibtn-p' : 'ibtn-o'" style="margin-left:auto" @click="filters.archived = !filters.archived; filters.status = ''; fetchCases()">
+        {{ filters.archived ? 'Viewing Archived' : 'View Archived' }}
+      </button>
+    </div>
+
+    <!-- Cases List -->
+    <div class="icard">
+      <div v-if="loading" style="text-align:center;padding:44px">
+        <div style="width:24px;height:24px;border:2px solid var(--mint);border-top-color:var(--moss);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto"></div>
+      </div>
+      <div v-else-if="cases.length === 0" class="empty-state">
+        <h3>No cases found</h3>
+        <p>Try adjusting your filters.</p>
+      </div>
+      <div class="ts" v-else>
+        <table class="itable">
+          <thead>
+            <tr>
+              <th>Ctrl No.</th>
+              <th>Student Name</th>
+              <th>Date Submitted</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="c in cases"
+              :key="c.id"
+              :style="'cursor:pointer;' + (filters.archived ? 'background:var(--snow);color:var(--stone)' : '')"
+              @click="$router.push({ name: 'student-show', params: { id: c.student?.id }, query: { ctx: 'cases' } })"
+            >
+              <!-- The Ctrl No. is the case's name; cases whose student has no client no. yet show the old number -->
+              <td>
+                <span v-if="ctrlNo(c)" style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--forest)">{{ ctrlNo(c) }}</span>
+                <span v-else style="font-family:var(--mono);font-size:11px;color:var(--stone)" title="No Ctrl No. yet - open the file to set the client number">{{ c.case_number }}</span>
+              </td>
+              <td>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div class="iav">{{ initials(c.student?.first_name, c.student?.last_name) }}</div>
+                  <div :style="'font-weight:600;color:' + (filters.archived ? 'var(--stone)' : 'var(--ink)')">{{ c.student?.last_name }}, {{ c.student?.first_name }} {{ c.student?.middle_name }}</div>
+                  <span v-if="filters.archived && c.student?.is_active === false" class="ibadge" style="background:var(--cloud);color:var(--stone)">Deactivated</span>
+                  <span v-else-if="filters.archived" class="ibadge" style="background:var(--cloud);color:var(--stone)">Archived</span>
+                  <span v-if="reassignedAwayFromMe(c)" class="ibadge" style="background:var(--amber-lt);color:var(--amber)">Reassigned</span>
+                  <span v-if="c.is_severe" class="ibadge" style="background:var(--red-lt);color:var(--red)">Severe</span>
+                </div>
+              </td>
+              <!-- opened_date is stamped with today() at the moment the founding
+                   referral is submitted (ReferralController@store), so it IS the
+                   case's date submitted - no backend change needed for the rename. -->
+              <td style="font-size:12px">{{ formatDate(c.opened_date) }}</td>
+              <td>
+                <button class="ibtn ibtn-o ibtn-sm" @click.stop="$router.push({ name: 'student-show', params: { id: c.student?.id }, query: { ctx: 'cases' } })">View</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div v-if="pagination.last_page > 1" style="padding:12px 18px;border-top:1px solid var(--cloud);display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:12px;color:var(--stone)">
+          Showing {{ pagination.from }}-{{ pagination.to }} of {{ pagination.total }}
+        </span>
+        <div style="display:flex;gap:6px">
+          <button class="ibtn ibtn-o ibtn-sm" :disabled="pagination.current_page === 1" @click="changePage(pagination.current_page - 1)">Prev</button>
+          <button class="ibtn ibtn-o ibtn-sm" :disabled="pagination.current_page === pagination.last_page" @click="changePage(pagination.current_page + 1)">Next</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue';
+import { useAutoRefresh } from '../../utils/useAutoRefresh';
+import { useRoute } from 'vue-router';
+import { caseAPI, studentAPI } from '../../api/index';
+import { safeSearchInput, blockSpecialKeypress } from '../../utils/validators';
+import { useAuthStore } from '../../stores/auth';
+
+const route = useRoute();
+const auth  = useAuthStore();
+
+// B562: this case was taken off the signed-in counselor and given to
+// someone else - still shown here (index() loads every case regardless of
+// counselor) but flagged so it reads as read-only history, not active work.
+function reassignedAwayFromMe(c) {
+  return !!c.previous_counselor_id && c.previous_counselor_id === auth.user?.id && c.primary_counselor_id !== auth.user?.id;
+}
+
+const cases      = ref([]);
+
+// Ctrl No. = "<year>-<term>" (set in Management for QF-OSS-GCU-01) + the student's client no.
+const ctrlPrefix = ref('');
+function ctrlNo(c) {
+  const n = c.student?.sif_client_no;
+  return n && ctrlPrefix.value ? `${ctrlPrefix.value}-${String(n).padStart(4, '0')}` : '';
+}
+const loading    = ref(true);
+const pagination = ref({});
+const filters    = ref({ search: '', status: '', archived: false, severe: false });
+
+async function fetchCases(page = 1, silent = false) {
+  if (!silent) loading.value = true;
+  try {
+    const res = await caseAPI.index({
+      ...filters.value,
+      archived: filters.value.archived ? 1 : 0,
+      severe:   filters.value.severe   ? 1 : 0,
+      page,    });
+    cases.value      = res.data.data;
+    pagination.value = res.data;
+  } catch (e) {
+    if (!silent) console.error(e);
+  } finally {
+    if (!silent) loading.value = false;
+  }
+}
+
+function onSearchInput() {
+  filters.value.search = safeSearchInput(filters.value.search);
+  fetchCases();
+}
+
+function resetFilters() {
+  filters.value = { search: '', status: '', archived: filters.value.archived, severe: false };
+  fetchCases();
+}
+
+function changePage(page) { fetchCases(page); }
+
+function initials(first, last) {
+  return ((first?.[0] || '') + (last?.[0] || '')).toUpperCase() || '?';
+}
+
+function formatDate(date) {
+  return date ? new Date(date).toLocaleDateString() : '-';
+}
+
+onMounted(() => {
+  studentAPI.documentSettings('QF-OSS-GCU-01').then(res => { ctrlPrefix.value = res.data?.ctrl_no || ''; }).catch(() => {});
+  // Arriving from a Dashboard stat card (?status=open) pre-filters the list
+  // to match what the card said, instead of dumping the user on an
+  // unfiltered "All Status" view.
+  if (route.query.status && typeof route.query.status === 'string') {
+    filters.value.status = route.query.status;
+  }
+  fetchCases();
+});
+
+// Keep the list current without a manual reload.
+useAutoRefresh(() => fetchCases(pagination.value?.current_page || 1, true), 25000);
+</script>

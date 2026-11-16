@@ -1,0 +1,127 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use App\Auth\Account as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+use App\Auth\HasAccessTokens;
+
+class User extends Authenticatable
+{
+    use HasAccessTokens, HasFactory, Notifiable;
+
+    protected $fillable = [
+        'name',
+        'first_name',
+        'last_name',
+        'email',
+        'employee_id',
+        'password',
+        'role',
+        'unit',
+        'college',
+        'department',
+        'contact_number',
+        'is_active',
+        'middle_name',
+        'suffix',
+        'temp_password',
+        'must_change_password',
+        'temp_password_expires_at',
+        'last_login_at',
+        'deactivation_reason',
+        'deactivation_note',
+        'deactivated_at',
+    ];
+
+    protected $hidden = [
+        'password',
+        'remember_token',
+        'temp_password',
+    ];
+
+    protected $casts = [
+        'email_verified_at'    => 'datetime',
+        'last_login_at'        => 'datetime',
+        'temp_password_expires_at' => 'datetime',
+        'deactivated_at'       => 'datetime',
+        'is_active'            => 'boolean',
+        'must_change_password' => 'boolean',
+        'password_changed_at'   => 'datetime',
+    ];
+
+    protected static function booted(): void
+    {
+        static::saving(function (User $user) {
+            if ($user->isDirty('first_name') || $user->isDirty('last_name') || $user->isDirty('middle_name') || $user->isDirty('suffix')) {
+                $user->name = implode(' ', array_filter(
+                    array_map('trim', [$user->first_name ?? '', $user->middle_name ?? '', $user->last_name ?? '', $user->suffix ?? '']),
+                    'strlen'
+                ));
+            }
+        });
+    }
+
+    // Role helpers
+    public function isSystemAdmin(): bool  { return $this->role === 'system_admin'; }
+    public function isAdmin(): bool        { return $this->role === 'admin'; }
+    public function isGCUStaff(): bool     { return $this->role === 'gcu_staff'; }
+    public function isSDUHead(): bool      { return $this->role === 'sdu_head'; }
+    // TMDU Head is a TMDU account too: everything TMDU Staff can do applies.
+    public function isTMDUStaff(): bool    { return in_array($this->role, ['tmdu_staff', 'tmdu_head'], true); }
+    public function isTMDUHead(): bool     { return $this->role === 'tmdu_head'; }
+    // Department Chairs are faculty-level accounts for everything except the
+    // Faculty page: they refer students and see their own referrals.
+    public function isFaculty(): bool      { return in_array($this->role, ['faculty', 'dept_chair'], true); }
+    // "Dean" and the older "Dean's Secretary" accounts are one role now: the
+    // college's office. Both see their college, handle Call Slips and manage
+    // their faculty.
+    public function isDean(): bool         { return in_array($this->role, ['dean', 'dean_secretary'], true); }
+    public function isDeptChair(): bool    { return $this->role === 'dept_chair'; }
+    public function isDeanSecretary(): bool{ return $this->isDean(); }
+    public function canCounsel(): bool     { return in_array($this->role, ['admin', 'gcu_staff']); }
+
+    // B#, 11/5/2026: the single source of truth for turning a raw role
+    // value into what staff actually read - previously only
+    // AuditLogController had this map (for its own exports), so every other
+    // place that showed a role to staff printed the raw enum value instead
+    // ("Invalid role 'tmdu_staff'." on the masterlist upload preview, etc.).
+    // Falls back to Title Case for any role not listed here, so a role
+    // added later still reads reasonably instead of showing raw/blank.
+    public const ROLE_LABELS = [
+        'admin'          => 'Admin / GCU Head',
+        'gcu_staff'      => 'GCU Staff',
+        'sdu_head'       => 'SDU Head',
+        'tmdu_staff'     => 'TMDU Staff',
+        'faculty'        => 'Faculty',
+        'dean'           => 'Dean',
+        'dept_chair'     => 'Department Chair',
+        'dean_secretary' => 'Dean',
+        'tmdu_head'      => 'TMDU Head',
+        'system_admin'   => 'System Admin',
+        'student'        => 'Student',
+    ];
+
+    public static function roleLabel(?string $role): string
+    {
+        if (!$role) {
+            return '';
+        }
+        return self::ROLE_LABELS[$role] ?? ucwords(str_replace('_', ' ', $role));
+    }
+
+    // Relationships
+    public function submittedReferrals()  { return $this->hasMany(Referral::class, 'referred_by_user_id'); }
+    public function assignedReferrals()   { return $this->hasMany(Referral::class, 'assigned_to_user_id'); }
+    public function cases()               { return $this->hasMany(CaseFile::class, 'primary_counselor_id'); }
+    public function appointments()        { return $this->hasMany(Appointment::class, 'staff_user_id'); }
+    public function availability()        { return $this->hasMany(StaffAvailability::class); }
+    public function sessionNotes()        { return $this->hasMany(SessionNote::class, 'recorded_by_user_id'); }
+    public function auditLogs()           { return $this->hasMany(AuditLog::class); }
+
+    public function sendPasswordResetNotification($token): void
+    {
+        $this->notify(new \App\Notifications\ResetPasswordLinkNotification($token, 'staff'));
+    }
+}

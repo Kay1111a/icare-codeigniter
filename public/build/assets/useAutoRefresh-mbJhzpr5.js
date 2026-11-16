@@ -1,0 +1,2 @@
+import{z as r,A as s}from"./index-CVPBUMsg.js";function c(n,o=25e3){let e=null;const t=()=>{if(document.visibilityState==="visible")try{n()}catch{}},i=()=>{document.visibilityState==="visible"&&t()};return r(()=>{e=setInterval(t,o),document.addEventListener("visibilitychange",i)}),s(()=>{clearInterval(e),document.removeEventListener("visibilitychange",i)}),()=>clearInterval(e)}export{c as u};
+//# sourceMappingURL=useAutoRefresh-mbJhzpr5.js.map

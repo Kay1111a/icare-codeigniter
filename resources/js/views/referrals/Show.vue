@@ -1,0 +1,3703 @@
+<!--
+  FILE: resources/js/views/referrals/Show.vue
+  PAGE: iCARE / Referral Details
+-->
+<template>
+  <div class="fade-up">
+    <!-- Loading -->
+    <div v-if="loading" style="text-align:center;padding:44px">
+      <div style="width:24px;height:24px;border:2px solid var(--mint);border-top-color:var(--moss);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto"></div>
+    </div>
+
+    <template v-else>
+      <!-- Back + Header -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+        <button class="ibtn ibtn-o ibtn-sm" @click="$router.back()">
+          <svg viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        </button>
+        <div class="ph" style="margin:0">
+          <!-- In Case Files the case is the subject being browsed, so the case
+               number is the page title and the referral code moves into the
+               summary strip below. Elsewhere the referral stays the subject. -->
+          <h1>{{ headerTitle }}</h1>
+          <p>{{ referral.student?.last_name }}, {{ referral.student?.first_name }} {{ referral.student?.middle_name }} · {{ referral.student?.student_id }}</p>
+        </div>
+        <!-- "Endorse to Unit" button removed (B285/B293). -->
+        <span v-if="referral.is_archived" class="ibadge" style="background:var(--cloud);color:var(--stone);margin-left:auto">Archived · view only</span>
+        <!-- Admin / GCU Staff: set this referral's status by hand -->
+        <button
+          v-if="['admin', 'gcu_staff'].includes(auth.user?.role) && !referral.is_archived && !isIncidentReport"
+          class="ibtn ibtn-o ibtn-sm"
+          :style="referral.is_archived ? '' : 'margin-left:auto'"
+          @click="openRefOverride"
+        >Override Status</button>
+      </div>
+
+      <!-- Override Status (GCU Head) -->
+      <div v-if="refOverride.open" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="refOverride.open = false">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:480px;overflow:hidden;box-shadow:var(--sh-lg)">
+          <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between">
+            <div style="font-size:15px;font-weight:600;color:var(--ink)">Override Referral Status</div>
+          </div>
+          <div style="padding:22px;display:flex;flex-direction:column;gap:12px">
+            <div style="font-size:12.5px;color:var(--stone)">Current status: <strong style="color:var(--ink)">{{ toTitleCase(String(referral.status || '').replace(/_/g, ' ')) }}</strong></div>
+            <div>
+              <label class="ifl">New Status <span style="color:var(--red)">*</span></label>
+              <select v-model="refOverride.status" class="ifse">
+                <option value="">Select status...</option>
+                <option v-for="o in REF_OVERRIDE_OPTIONS.filter(o => o.value !== referral.status)" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
+            </div>
+            <!-- Bug: overriding straight to "Scheduled" only flipped the
+                 status label with no actual date/time set. Asking for them
+                 here applies them to the student's waiting appointment,
+                 same as "Schedule Now". -->
+            <div v-if="refOverride.status === 'scheduled'" style="display:flex;flex-direction:column;gap:8px;background:var(--foam);border-radius:var(--r-sm);padding:10px 12px">
+              <label class="ifl">Appointment Date &amp; Time <span style="color:var(--red)">*</span></label>
+              <!-- B#, 11/5/2026: all three on one flex-wrap row (date + both
+                   times) didn't actually fit this modal's width, so the time
+                   inputs kept wrapping one-per-line, stacked awkwardly under
+                   the date. Date now gets its own full-width row, and the
+                   two times share a row of their own underneath - always
+                   beside each other, with no wrap risk since it's just the
+                   two of them split evenly. -->
+              <input v-model="refOverride.appointment_date" type="date" class="ifi" style="width:100%" />
+              <div style="display:flex;gap:8px">
+                <input v-model="refOverride.start_time" type="time" class="ifi" style="flex:1;min-width:0" />
+                <input v-model="refOverride.end_time" type="time" class="ifi" style="flex:1;min-width:0" />
+              </div>
+            </div>
+            <div>
+              <label class="ifl">Reason <span style="color:var(--red)">*</span></label>
+              <input v-model="refOverride.reason" class="ifi" maxlength="255" placeholder="Why is the status being changed?" />
+              <div v-if="refOverride.reason.trim() && !/\p{L}/u.test(refOverride.reason)" style="font-size:11px;color:var(--red);margin-top:4px">Please explain the reason in words, not numbers only.</div>
+            </div>
+            <div v-if="refOverride.error" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px">{{ refOverride.error }}</div>
+            <div style="display:flex;gap:8px">
+              <button
+                class="ibtn ibtn-p"
+                style="flex:1;justify-content:center"
+                :disabled="refOverride.saving || !refOverride.status || refOverride.reason.trim().length < 5 || !/\p{L}/u.test(refOverride.reason) || (refOverride.status === 'scheduled' && (!refOverride.appointment_date || !refOverride.start_time || !refOverride.end_time))"
+                @click="applyRefOverride"
+              >{{ refOverride.saving ? 'Saving...' : 'Save Status' }}</button>
+              <button class="ibtn ibtn-o" style="flex:1;justify-content:center" @click="refOverride.open = false">Cancel</button>
+            </div>
+            <div style="font-size:11px;color:var(--fog)">The change and its reason are recorded in the Audit Logs.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Case Summary - Student Information Files only; the Referral Queue
+           only displays the referral's own details. -->
+      <div class="icard" v-if="referral.case && fromCases" style="margin-bottom:16px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;padding:16px">
+          <div>
+            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">{{ fromCases ? 'Referral Number' : 'Case Number' }}</div>
+            <div style="font-family:var(--mono);font-size:13px;color:var(--ink)">{{ fromCases ? referral.referral_code : referral.case.case_number }}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Current Unit</div>
+            <span class="ibadge" :class="'unit-' + referral.case.current_unit?.toLowerCase()">{{ referral.case.current_unit }}</span>
+          </div>
+          <div v-if="!isIncidentReport">
+            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Counselor</div>
+            <div style="font-size:13px;color:var(--ink)">{{ referral.case.counselor?.name || '-' }}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Sessions</div>
+            <div style="font-size:13px;color:var(--ink)">{{ referral.case.total_sessions }}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Last Session</div>
+            <div style="font-size:13px;color:var(--ink)">{{ formatDate(referral.case.last_session_at) }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Status Pipeline - full width, not confined to the left column -->
+      <div class="icard" style="margin-bottom:16px">
+        <div class="icard-header"><span class="icard-title">{{ isIncidentReport ? 'Incident Report Status' : 'Referral Status' }}</span></div>
+        <div style="padding:16px 18px">
+          <div class="pipe" style="display:flex;gap:0;overflow-x:auto">
+            <div
+              v-for="(step, i) in pipeline"
+              :key="step.key"
+              class="pipe-step"
+              style="flex:1;min-width:80px;padding:10px 14px;text-align:center;font-size:11px;font-weight:600;border:1px solid var(--cloud)"
+              :style="{
+                background: isStepDone(step.key) ? 'var(--mist)' : isCurrentStep(step.key) ? 'var(--moss)' : '#fff',
+                color: isStepDone(step.key) ? 'var(--moss)' : isCurrentStep(step.key) ? '#fff' : 'var(--stone)',
+                borderColor: isStepDone(step.key) ? 'var(--mint)' : isCurrentStep(step.key) ? 'var(--moss)' : 'var(--cloud)',
+                borderRadius: i === 0 ? 'var(--r-sm) 0 0 var(--r-sm)' : i === pipeline.length - 1 ? '0 var(--r-sm) var(--r-sm) 0' : '0',
+              }"
+            >
+              {{ step.label }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 340px;gap:16px">
+
+        <!-- Left -->
+        <div style="display:flex;flex-direction:column;gap:16px">
+
+          <!-- Incident Report - the whole filed Complaint plus its evidence,
+               shown in place of Referral Info once a Complaint-originated
+               referral (disciplinary, filed via ComplaintController::store())
+               has been acknowledged. -->
+          <div class="icard" v-if="isIncidentReport">
+            <div class="icard-header">
+              <span class="icard-title">Incident Report</span>
+            </div>
+            <div class="icard-body">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+                <div>
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Complainant</div>
+                  <div style="font-size:13px;color:var(--ink)">{{ referral.complaint?.complainant_name || '-' }}</div>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Complainant Address</div>
+                  <div style="font-size:13px;color:var(--ink)">{{ referral.complaint?.complainant_address || '-' }}</div>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Complainee</div>
+                  <div style="font-size:13px;color:var(--ink)">
+                    {{ referral.complaint?.complainee?.last_name }}, {{ referral.complaint?.complainee?.first_name }}
+                    <span style="color:var(--fog);font-family:var(--mono)">({{ referral.complaint?.complainee?.student_id }})</span>
+                  </div>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Complainee Position</div>
+                  <div style="font-size:13px;color:var(--ink)">{{ referral.complaint?.complainee_position || '-' }}</div>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">College / Department / Office</div>
+                  <div style="font-size:13px;color:var(--ink)">{{ [referral.complaint?.complainee_college, referral.complaint?.complainee_department, referral.complaint?.complainee_office].filter(Boolean).join(' / ') || '-' }}</div>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Complainee Address</div>
+                  <div style="font-size:13px;color:var(--ink)">{{ referral.complaint?.complainee_address || '-' }}</div>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Violation Type</div>
+                  <div style="font-size:13px;color:var(--ink)">{{ referral.complaint?.violation_type || '-' }}</div>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Date of Incident</div>
+                  <div style="font-size:13px;color:var(--ink)">{{ formatDate(referral.complaint?.incident_date) }}</div>
+                </div>
+              </div>
+              <div style="margin-bottom:14px">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:4px">Narration of Facts</div>
+                <div style="font-size:13.5px;color:var(--ink);line-height:1.6;background:var(--snow);padding:10px 12px;border-radius:var(--r-sm);border-left:2px solid var(--silver);white-space:pre-line">{{ referral.complaint?.description || '-' }}</div>
+              </div>
+              <div v-if="referral.complaint?.attachments?.length">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:6px">Evidence / Affidavit</div>
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <a
+                    v-for="att in referral.complaint.attachments"
+                    :key="att.id"
+                    href="#"
+                    @click.prevent="openAttachment(att)"
+                    style="font-size:12.5px;color:var(--blue);text-decoration:underline;display:flex;align-items:center;gap:6px"
+                  >
+                    <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;flex-shrink:0"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    {{ att.original_filename }}
+                    <span style="color:var(--fog);text-decoration:none">({{ toTitleCase(att.category) }})</span>
+                  </a>
+                </div>
+              </div>
+              <div v-if="referral.sanction" style="margin-top:14px">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:4px">Sanction / Outcome</div>
+                <div style="font-size:13px;color:var(--ink)">{{ toTitleCase(referral.sanction) }}</div>
+                <div v-if="referral.sanction_notes" style="font-size:12px;color:var(--slate);margin-top:4px;line-height:1.6">{{ referral.sanction_notes }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Referral Info (merged with the former "Referral Details" card) -->
+          <div class="icard" v-if="!isIncidentReport">
+            <!-- Bug (10/30/2026): Edit Referral/Delete Referral used to sit
+                 directly in the title's own flex row, each with its own
+                 margin-left:auto - on a narrow screen that row couldn't fit
+                 title + 2 buttons, so it wrapped mid-row with the buttons
+                 misaligned (Delete Referral landing on its own line, pinned
+                 left instead of lining up with Edit Referral). Grouped the
+                 action buttons into their own wrapper so the title stays on
+                 its own line and the buttons wrap together as a unit - see
+                 .icard-header .ref-actions in app.css for the mobile rule
+                 that makes them share a tidy, evenly-sized row underneath. -->
+            <div class="icard-header">
+              <span class="icard-title">{{ isCaseReferralSlip ? 'Case Referral Slip' : 'Referral Info' }}</span>
+              <div class="ref-actions" style="margin-left:auto;display:flex;flex-wrap:wrap;gap:8px">
+                <button v-if="canEditSubmittedReferral" class="ibtn ibtn-o ibtn-sm" @click="openReferralEdit">Edit Referral</button>
+                <!-- Delete only while unacknowledged - once GCU/SDU/TMDU
+                     acknowledges it, it's their record and the referrer can
+                     only ask to void it (the button below instead). -->
+                <button v-if="canEditSubmittedReferral" class="ibtn ibtn-o ibtn-sm" style="color:var(--red);border-color:#f5c0c0" :disabled="deletingReferral" @click="deleteReferral">{{ deletingReferral ? 'Deleting...' : 'Delete Referral' }}</button>
+                <button v-if="canRequestVoid" class="ibtn ibtn-o ibtn-sm" style="color:var(--red);border-color:#f5c0c0" @click="showVoidModal = true">Request Cancellation/Void of Referral</button>
+              </div>
+            </div>
+
+            <!-- Pending cancellation/void request - shown to the referrer
+                 (status) and to the reviewing unit (Approve/Deny). -->
+            <div v-if="referral.void_requested_at" style="margin:0 18px 14px;background:var(--amber-lt);border:1px solid var(--amber);border-radius:var(--r-sm);padding:12px 14px">
+              <div style="font-size:12.5px;color:var(--amber);font-weight:600">Cancellation/Void requested{{ isReferrerOfThis ? '' : ` by ${referral.referrer_name}` }}</div>
+              <div style="font-size:12px;color:var(--slate);margin-top:4px;line-height:1.5">{{ referral.void_reason }}</div>
+              <div v-if="canReviewVoid" style="display:flex;gap:8px;margin-top:10px">
+                <button class="ibtn ibtn-p ibtn-sm" :disabled="decidingVoid" @click="approveVoidRequest">{{ decidingVoid ? 'Working...' : 'Approve (Archive Referral)' }}</button>
+                <button class="ibtn ibtn-o ibtn-sm" :disabled="decidingVoid" @click="denyVoidRequest">Deny</button>
+              </div>
+              <div v-else-if="isReferrerOfThis" style="font-size:11.5px;color:var(--stone);margin-top:6px">Waiting for review.</div>
+            </div>
+
+            <!-- Document Code Header - read only. Revision No. / Effectivity /
+                 Ctrl No. are edited in Management by admin, not here. -->
+            <div class="doc-header-hidden" style="padding:10px 18px;border-bottom:1px solid var(--cloud);display:flex;justify-content:space-between;align-items:center;background:var(--snow)">
+              <div style="font-size:11px;color:var(--stone)">
+                <div><strong>Document Code:</strong> QF-OSS-01</div>
+                <div><strong>Revision No.:</strong> {{ headerDoc.revision_no || '01' }}</div>
+              </div>
+              <div style="font-size:11px;color:var(--stone);text-align:right">
+                <div><strong>Effectivity:</strong> {{ formatDocDate(headerDoc.effectivity_date) }}</div>
+                <div><strong>Ctrl No.:</strong> {{ headerDoc.ctrl_no || '-' }}</div>
+              </div>
+            </div>
+
+            <div class="icard-body">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+                <div>
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Referred By</div>
+                  <div style="font-size:13px;color:var(--ink)">{{ referral.referrer_name || '-' }} <span style="color:var(--fog)">({{ toTitleCase(referral.referrer_role) }})</span></div>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Client Status</div>
+                  <span class="ibadge" :style="referral.client_status === 'existing' ? 'background:var(--blue-lt);color:var(--blue)' : 'background:var(--mist);color:var(--moss)'">
+                    {{ referral.client_status === 'existing' ? 'Existing Client' : 'New Client' }}
+                  </span>
+                  <span v-if="referral.case?.is_recurring" class="ibadge" style="background:var(--blue-lt);color:var(--blue);margin-left:4px">Recurring</span>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Date Submitted</div>
+                  <div style="font-size:13px;color:var(--ink)">{{ formatDateTime(referral.created_at) }}</div>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Service Requested</div>
+                  <div style="font-size:13px;color:var(--ink)">{{ toTitleCase(referral.referral_type) || '-' }}</div>
+                </div>
+                <div v-if="referral.acknowledged_at">
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Acknowledged</div>
+                  <div style="font-size:13px;color:var(--ink)">{{ formatDate(referral.acknowledged_at) }}</div>
+                  <button
+                    v-if="!fromCases && (isGCU || isTMDUStaff)"
+                    class="ibtn ibtn-o ibtn-sm"
+                    style="margin-top:6px"
+                    @click="goToStudentInformationFile"
+                  >
+                    {{ isTMDUStaff ? 'View Student Records' : 'Go to Student Information File' }}
+                  </button>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Referral Code</div>
+                  <div style="font-size:13px;color:var(--ink);font-family:var(--mono)">{{ referral.referral_code }}</div>
+                </div>
+              </div>
+              <div style="margin-bottom:14px">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:4px">Concern / Reason for Referral</div>
+                <div style="font-size:13.5px;color:var(--ink);line-height:1.6;background:var(--snow);padding:10px 12px;border-radius:var(--r-sm);border-left:2px solid var(--silver)">{{ referral.nature_of_concern }}</div>
+              </div>
+              <div v-if="referral.intake_notes" style="margin-bottom:14px">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:4px">Intake Notes</div>
+                <div style="font-size:13px;color:var(--slate);line-height:1.6;background:var(--snow);padding:10px 12px;border-radius:var(--r-sm);border-left:2px solid var(--silver)">{{ referral.intake_notes }}</div>
+              </div>
+              <div v-if="referral.violation_type" style="margin-bottom:14px">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:4px">Violation Type</div>
+                <div style="font-size:13px;color:var(--ink)">{{ referral.violation_type }}</div>
+              </div>
+              <div v-if="referral.incident_date" style="margin-bottom:14px">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:4px">Date of Incident</div>
+                <div style="font-size:13px;color:var(--ink)">{{ formatDate(referral.incident_date) }}</div>
+              </div>
+              <div v-if="referral.sanction" style="margin-bottom:14px">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:4px">Sanction / Outcome</div>
+                <div style="font-size:13px;color:var(--ink)">{{ toTitleCase(referral.sanction) }}</div>
+                <div v-if="referral.sanction_notes" style="font-size:12px;color:var(--slate);margin-top:4px;line-height:1.6">{{ referral.sanction_notes }}</div>
+              </div>
+
+              <!-- Handoff/endorsement history - just a record of what moved
+                   where and why, no confirm-receipt step needed. Scoped to
+                   this referral (see caseHandoffs computed) so a case that
+                   carries more than one referral (e.g. a sibling TMDU
+                   referral) doesn't leak the other referral's endorsements
+                   in here. -->
+              <div v-if="caseHandoffs.length">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:6px">Handoff / Endorsement History</div>
+                <div v-for="h in [...caseHandoffs].reverse()" :key="h.id" style="padding:8px 0;border-top:1px solid var(--cloud)">
+                  <div style="font-size:12.5px;font-weight:600;color:var(--ink)">{{ h.from_unit }} → {{ h.to_unit }}</div>
+                  <div style="font-size:11px;color:var(--stone);margin-top:2px">By {{ h.from_user?.name || '-' }} to {{ h.to_user?.name || '-' }}</div>
+                  <div v-if="h.reason" style="font-size:12px;color:var(--slate);margin-top:4px">{{ h.reason }}</div>
+                  <div style="font-size:11px;color:var(--fog);margin-top:2px">{{ formatDate(h.created_at) }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+
+          <!-- For the person who referred the student (faculty, chair, dean...):
+               this referral's Feedback Slip and Admission Slip, and a way to
+               ask GCU for the Feedback Slip once the referral is completed. -->
+          <div class="icard" v-if="isReferrer && !fromCases && !isIncidentReport">
+            <div class="icard-header"><span class="icard-title">Feedback Slip</span></div>
+            <div class="icard-body" style="display:flex;flex-direction:column;gap:10px">
+              <template v-if="!referral.feedback_slips?.length">
+                <div style="font-size:13px;color:var(--stone)">
+                  {{ ['completed', 'closed'].includes(referral.status)
+                    ? 'This referral is completed. You can ask GCU for its feedback slip.'
+                    : 'GCU sends the feedback slip after working with the student. You can ask for it once this referral is completed.' }}
+                </div>
+                <button
+                  v-if="['completed', 'closed'].includes(referral.status)"
+                  class="ibtn ibtn-p ibtn-sm"
+                  style="align-self:flex-start"
+                  :disabled="feedbackRequested || requestingFeedback"
+                  @click="requestFeedbackSlip"
+                >{{ feedbackRequested ? 'Requested' : (requestingFeedback ? 'Sending...' : 'Request Feedback Slip') }}</button>
+              </template>
+              <div v-for="slip in referral.feedback_slips || []" :key="slip.id" style="padding-top:6px">
+                <FeedbackSlipPaper
+                  :slip="slip"
+                  :student="referral.student"
+                  :doc="{ revision_no: feedbackDoc.revision_no, effectivity: feedbackDoc.effectivity_date ? formatDocDate(feedbackDoc.effectivity_date) : '', ctrl_no: feedbackDoc.ctrl_no }"
+                  :show-doc="false"
+                />
+              </div>
+            </div>
+          </div>
+          <div class="icard" v-if="isReferrer && !fromCases && isClassAttendance && referral.admission_issued_at">
+            <div class="icard-header"><span class="icard-title">Admission Slip</span></div>
+            <div class="icard-body">
+              <AdmissionSlipPaper
+                readonly
+                :model-value="issuedAdmissionSlip"
+                :student="referral.student"
+                :personnel="referral.admission_issued_by?.name || ''"
+                :issued-at="referral.admission_issued_at"
+                :doc="{ revision_no: admissionDoc.revision_no, effectivity: admissionDoc.effectivity_date ? formatDocDate(admissionDoc.effectivity_date) : '', ctrl_no: admissionDoc.ctrl_no }"
+              />
+            </div>
+          </div>
+
+          <!-- Admission Slip - Class Attendance referrals only. This is the
+               actual excused/unexcused determination (previously this lived
+               inside Previous Interventions, conflating a narrative log with
+               an official slip that has its own document code). Once marked
+               Unexcused, it locks further edits to this referral, same as
+               before - just checked on the referral's own admission_excused
+               column now (ReferralController::saveAdmissionSlip()) instead
+               of digging through case interventions. -->
+          <div class="icard" v-if="isClassAttendance && referral.case && fromCases && !isIncidentReport">
+            <div class="icard-header"><span class="icard-title">Admission Slip</span></div>
+
+            <div class="doc-header-hidden" style="padding:10px 18px;border-bottom:1px solid var(--cloud);display:flex;justify-content:space-between;align-items:center;background:var(--snow)">
+              <div style="font-size:11px;color:var(--stone)">
+                <div><strong>Document Code:</strong> QF-OSS-GCU-09</div>
+                <div><strong>Revision No.:</strong> {{ admissionDoc.revision_no || '01' }}</div>
+              </div>
+              <div style="font-size:11px;color:var(--stone);text-align:right">
+                <div><strong>Effectivity:</strong> {{ admissionDoc.effectivity_date ? formatDocDate(admissionDoc.effectivity_date) : '07/04/23' }}</div>
+                <div><strong>Ctrl No.:</strong> {{ admissionDoc.ctrl_no || '26-1' }}</div>
+              </div>
+            </div>
+
+            <div class="icard-body">
+              <template v-if="isGCU && admission_excused_locked">
+                <div style="padding:8px 12px;background:var(--mist);border-radius:var(--r-sm);font-size:12px;color:var(--moss)">
+                  ✓ This referral has been marked Unexcused. No further changes can be made to the admission slip.
+                </div>
+              </template>
+              <template v-else-if="isGCU && isResolved">
+                <div style="padding:8px 12px;background:var(--mist);border-radius:var(--r-sm);font-size:12px;color:var(--moss)">
+                  ✓ {{ lockedText }}
+                </div>
+              </template>
+              <template v-else-if="isGCU && !canEditSif">
+                <div style="padding:8px 12px;background:var(--cloud);border-radius:var(--r-sm);font-size:12px;color:var(--stone)">
+                  ⚠ This referral must be acknowledged and have an appointment set and attended before an admission slip can be issued.
+                </div>
+              </template>
+              <template v-else-if="isGCU">
+                <button class="ibtn ibtn-p ibtn-sm" style="margin-bottom:12px" @click="openAdmissionSlip">
+                  <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  {{ referral.admission_issued_at ? 'Update Admission Slip' : 'Issue Admission Slip' }}
+                </button>
+              </template>
+
+              <AdmissionSlipPaper
+                v-if="referral.admission_issued_at"
+                readonly
+                :model-value="issuedAdmissionSlip"
+                :student="referral.student"
+                :personnel="referral.admission_issued_by?.name || ''"
+                :issued-at="referral.admission_issued_at"
+                :show-doc="false"
+                :doc="{ revision_no: admissionDoc.revision_no, effectivity: admissionDoc.effectivity_date ? formatDocDate(admissionDoc.effectivity_date) : '', ctrl_no: admissionDoc.ctrl_no }"
+              />
+              <div v-else style="font-size:13px;color:var(--stone)">No admission slip has been issued yet.</div>
+            </div>
+          </div>
+
+          <!-- Issue / Update Admission Slip (paper format) -->
+          <div v-if="showAdmissionModal" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto" @click.self="closeAdmissionSlip">
+            <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:640px;overflow:hidden;box-shadow:var(--sh-lg);margin:auto 0">
+              <div style="padding:18px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between">
+                <div style="font-size:15px;font-weight:600;color:var(--ink)">{{ referral.admission_issued_at ? 'Update Admission Slip' : 'Issue Admission Slip' }}</div>
+                <button class="ibtn ibtn-g ibtn-sm" @click="closeAdmissionSlip">✕</button>
+              </div>
+              <div style="padding:18px 22px;display:flex;flex-direction:column;gap:12px">
+                <AdmissionSlipPaper
+                  v-model="admissionForm"
+                  :student="referral.student"
+                  :personnel="auth.user?.name || ''"
+                  :doc="{ revision_no: admissionDoc.revision_no, effectivity: admissionDoc.effectivity_date ? formatDocDate(admissionDoc.effectivity_date) : '', ctrl_no: admissionDoc.ctrl_no }"
+                />
+                <div style="font-size:11.5px;color:var(--stone)">Once saved as <strong>Unexcused</strong>, the slip can no longer be changed.</div>
+                <div v-if="admissionError" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px">{{ admissionError }}</div>
+                <div style="display:flex;gap:8px">
+                  <button class="ibtn ibtn-p" style="flex:1;justify-content:center" :disabled="savingAdmission" @click="saveAdmissionSlip">{{ savingAdmission ? 'Saving...' : 'Save Admission Slip' }}</button>
+                  <button class="ibtn ibtn-o" style="flex:1;justify-content:center" :disabled="savingAdmission" @click="closeAdmissionSlip">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sanction/s Given - Incident Report only. Case-level, append-only
+               log reusing the CaseIntervention mechanism (type: 'sanction'),
+               same pattern as Previous Interventions but without the
+               excused/unexcused remarks or locking logic. -->
+          <div class="icard" v-if="isIncidentReport && referral.case && fromCases">
+            <div class="icard-header"><span class="icard-title">Sanction/s Given</span></div>
+            <div class="icard-body">
+              <div v-if="canManageIncidentReport" style="margin-bottom:16px">
+                <label class="ifl">Sanction</label>
+                <textarea v-model="sanctionForm.text" class="ifta" style="min-height:70px" placeholder="Describe the sanction given..." maxlength="2000"></textarea>
+                <button class="ibtn ibtn-p ibtn-sm" style="margin-top:8px" @click="addSanction">Save Entry</button>
+              </div>
+              <div v-if="!sanctionsForReferral.length" style="font-size:13px;color:var(--stone)">No sanctions recorded yet.</div>
+              <div v-else style="display:flex;flex-direction:column;gap:8px">
+                <div
+                  v-for="item in sanctionsForReferral"
+                  :key="item.id"
+                  style="padding:10px 12px;background:var(--snow);border-radius:var(--r-sm);border-left:2px solid var(--silver)"
+                >
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+                    <div style="font-size:13px;color:var(--ink)">{{ item.description }}</div>
+                    <div style="font-size:11px;color:var(--fog);flex-shrink:0">{{ formatDate(item.created_at) }}</div>
+                  </div>
+                  <div style="font-size:10.5px;color:var(--fog);margin-top:3px">By {{ item.recorded_by?.name || item.person_in_charge?.name || '-' }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Detailed Report - Incident Report only. Same append-only log
+               pattern as Session Notes, typed as 'detailed_report'. -->
+          <div class="icard" v-if="isIncidentReport && referral.case && fromCases">
+            <div class="icard-header"><span class="icard-title">Detailed Report</span></div>
+            <div class="icard-body">
+              <div v-if="canManageIncidentReport" style="margin-bottom:16px">
+                <label class="ifl">Report Entry</label>
+                <textarea v-model="detailedReportForm.text" class="ifta" style="min-height:80px" placeholder="Write a detailed report entry..." maxlength="3000"></textarea>
+                <button class="ibtn ibtn-p ibtn-sm" style="margin-top:8px" @click="addDetailedReport">Save Entry</button>
+              </div>
+              <div v-if="!detailedReportsForReferral.length" style="font-size:13px;color:var(--stone)">No detailed report entries yet.</div>
+              <div v-else style="display:flex;flex-direction:column;gap:8px">
+                <div
+                  v-for="item in detailedReportsForReferral"
+                  :key="item.id"
+                  style="padding:12px 14px;background:var(--snow);border-radius:var(--r-sm);border-left:2px solid var(--silver)"
+                >
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog)">{{ formatDate(item.created_at) }}</div>
+                  <div style="font-size:13px;color:var(--slate);line-height:1.6;white-space:pre-line;margin-top:4px">{{ item.description }}</div>
+                  <div style="font-size:10.5px;color:var(--fog);margin-top:6px">By {{ item.recorded_by?.name || item.person_in_charge?.name || '-' }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Feedback Slip - copy sent to the referrer for transparency.
+               Removed from the Referral Queue's own page (it only displays
+               details); still available from Student Information Files.
+               Removed entirely for an Incident Report. -->
+          <div class="icard" v-if="fromCases && !isIncidentReport">
+            <div class="icard-header"><span class="icard-title">Feedback Slip</span></div>
+
+            <!-- Document Code Header - read only. Revision No. / Effectivity /
+                 Ctrl No. are edited in Management by admin. -->
+            <div class="doc-header-hidden" style="padding:10px 18px;border-bottom:1px solid var(--cloud);display:flex;justify-content:space-between;align-items:center;background:var(--snow)">
+              <div style="font-size:11px;color:var(--stone)">
+                <div><strong>Document Code:</strong> QF-OSS-03</div>
+                <div><strong>Revision No.:</strong> {{ feedbackDoc.revision_no || '01' }}</div>
+              </div>
+              <div style="font-size:11px;color:var(--stone);text-align:right">
+                <div><strong>Effectivity:</strong> {{ formatDocDate(feedbackDoc.effectivity_date) }}</div>
+                <div><strong>Ctrl No.:</strong> {{ feedbackDoc.ctrl_no || '-' }}</div>
+              </div>
+            </div>
+
+            <div class="icard-body">
+              <template v-if="isGCU && isResolved">
+                <div style="padding:8px 12px;background:var(--mist);border-radius:var(--r-sm);font-size:12px;color:var(--moss)">
+                  ✓ {{ lockedText }}
+                </div>
+              </template>
+              <template v-else-if="isGCU && !canEditSif">
+                <div style="padding:8px 12px;background:var(--cloud);border-radius:var(--r-sm);font-size:12px;color:var(--stone)">
+                  ⚠ This referral must be acknowledged and have an appointment set and attended before a feedback slip can be sent.
+                </div>
+              </template>
+              <template v-else-if="isGCU">
+                <!-- Form is hidden by default, shows when showFeedbackForm is true -->
+                <div v-if="showFeedbackForm" style="display:flex;flex-direction:column;gap:10px">
+                  <div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:8px">Intervention/s or Assistance Provided <span style="color:var(--red)">*</span> <span style="text-transform:none;letter-spacing:0;font-weight:500">(select at least one)</span></div>
+                  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+                    <label v-for="item in FEEDBACK_CHECKLIST_ITEMS" :key="item.key" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--slate);cursor:pointer">
+                      <input type="checkbox" :value="item.key" v-model="feedbackForm.feedback_checklist" style="width:15px;height:15px;accent-color:var(--moss)"/>
+                      {{ item.label }}
+                      <input
+                        v-if="item.key === 'referred_other' && feedbackForm.feedback_checklist.includes('referred_other')"
+                        v-model="feedbackForm.feedback_referred_other_text"
+                        type="text"
+                        placeholder="for interventions..."
+                        style="flex:1;font-size:12px;padding:3px 6px;border:1px solid var(--cloud);border-radius:3px"
+                      />
+                      <input
+                        v-if="item.key === 'others' && feedbackForm.feedback_checklist.includes('others')"
+                        v-model="feedbackForm.feedback_others_text"
+                        type="text"
+                        placeholder="specify..."
+                        style="flex:1;font-size:12px;padding:3px 6px;border:1px solid var(--cloud);border-radius:3px"
+                      />
+                    </label>
+                  </div>
+
+                  <label class="ifl">Remarks</label>
+                  <textarea v-model="feedbackForm.feedback_notes" class="ifta" placeholder="Progress / outcome summary to send to the referrer..." maxlength="3000"></textarea>
+
+                  <div style="font-size:11px;color:var(--fog);margin-top:10px">
+                    Attending OSS Personnel: <strong style="color:var(--ink)">{{ auth.user?.name }}</strong>
+                  </div>
+
+                  <div style="display:flex;gap:8px;margin-top:10px">
+                    <button class="ibtn ibtn-p ibtn-sm" @click="openFeedbackConfirm">
+                      <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                      Send to Referrer
+                    </button>
+                    <button class="ibtn ibtn-o ibtn-sm" @click="showFeedbackForm = false">Cancel</button>
+                  </div>
+                </div>
+
+                <!-- The button that reveals the form -->
+                <div v-else>
+                  <button class="ibtn ibtn-p ibtn-sm" @click="showFeedbackForm = true">
+                    <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    Issue Feedback Slip
+                  </button>
+                </div>
+              </template>
+              <template v-else>
+                <div v-if="!referral.feedback_slips?.length" style="font-size:13px;color:var(--stone)">No feedback has been shared yet.</div>
+              </template>
+            </div>
+
+            <!-- Sent history - like Session Notes, every send is kept as its
+                 own permanent record here rather than being overwritten by
+                 the next one. -->
+            <div v-if="referral.feedback_slips?.length">
+              <div v-for="slip in referral.feedback_slips" :key="slip.id" style="padding:14px 18px;border-top:1px solid var(--cloud)">
+                <FeedbackSlipPaper
+                  :slip="slip"
+                  :student="referral.student"
+                  :doc="{ revision_no: feedbackDoc.revision_no, effectivity: feedbackDoc.effectivity_date ? formatDocDate(feedbackDoc.effectivity_date) : '', ctrl_no: feedbackDoc.ctrl_no }"
+                  :show-doc="false"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- PAR Results - staff only, Student Information Files only.
+               Surfaces the psychological assessment report once TMDU has
+               issued it, without GCU needing to open the sibling
+               psychological_testing referral's own Testing Record. -->
+          <div class="icard" v-if="isGCU && fromCases && tmduTestingRecord && tmduTestingRecord.status === 'test_results_issued'">
+            <div class="icard-header"><span class="icard-title">Psychological Assessment Report (PAR)</span></div>
+            <div class="icard-body">
+              <div v-if="tmduTestingRecord.tests_administered?.length" style="margin-bottom:12px">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:4px">Psychological Tests Administered</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px">
+                  <span v-for="test in tmduTestingRecord.tests_administered" :key="test" class="ibadge" style="background:var(--mist);color:var(--moss)">{{ test }}</span>
+                </div>
+              </div>
+              <div style="margin-bottom:12px">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:4px">Assessment Summary</div>
+                <div style="font-size:13.5px;color:var(--ink);line-height:1.6;background:var(--snow);padding:10px 12px;border-radius:var(--r-sm);border-left:2px solid var(--silver)">{{ tmduTestingRecord.assessment_summary || '-' }}</div>
+              </div>
+              <div style="margin-bottom:12px">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:4px">Recommended Actions</div>
+                <div style="font-size:13.5px;color:var(--ink);line-height:1.6;background:var(--snow);padding:10px 12px;border-radius:var(--r-sm);border-left:2px solid var(--silver)">{{ tmduTestingRecord.recommendations || '-' }}</div>
+              </div>
+              <a v-if="parDocument" href="#" @click.prevent="openPar(parDocument)" class="ibtn ibtn-o ibtn-sm" style="margin-bottom:8px">
+                <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                {{ parDocument.original_filename || 'View PAR File' }}
+              </a>
+              <div style="font-size:11px;color:var(--fog)">
+                Released by TMDU {{ formatDate(tmduTestingRecord.report_sent_at) }}<span v-if="tmduTestingRecord.tester?.name"> &middot; {{ tmduTestingRecord.tester.name }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Session Notes - staff only, Student Information Files only.
+               Replaced by Detailed Report for an Incident Report. -->
+          <div class="icard" v-if="isGCU && fromCases && !isIncidentReport">
+            <div class="icard-header">
+              <span class="icard-title">Session Notes</span>
+              <button v-if="!isResolved && canEditSif" class="ibtn ibtn-p ibtn-sm" @click="showSessionModal = true">
+                <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Add Notes
+              </button>
+              <div v-else-if="!isResolved && !canEditSif" style="font-size:11px;color:var(--stone)">
+                ⚠ Must be acknowledged with an attended appointment first
+              </div>
+            </div>
+            <div v-if="!isResolved" style="padding:8px 18px;background:var(--amber-lt);border-bottom:1px solid var(--cloud);font-size:12px;color:var(--amber)">
+              <strong>Required:</strong> Session notes must be filled out before this referral can be resolved.
+            </div>
+            <div v-if="sessionNotes.length === 0" class="empty-state">
+              <h3>No sessions yet</h3>
+              <p>Log the first session to start tracking progress.</p>
+            </div>
+            <div v-else>
+              <div v-for="note in pagedSessionNotes" :key="note.id" style="padding:16px 18px;border-bottom:1px solid var(--cloud)">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                  <div style="font-size:13px;font-weight:600;color:var(--ink)">
+                    Session #{{ note.session_number }} - {{ formatDate(note.session_date) }}
+                  </div>
+                </div>
+                <div v-if="note.session_start_time && note.session_end_time" style="font-size:11px;color:var(--stone);margin-bottom:8px">
+                  {{ formatTime12(note.session_start_time) }} - {{ formatTime12(note.session_end_time) }}
+                </div>
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:4px">Observations</div>
+                <div style="font-size:13px;color:var(--slate);line-height:1.6;background:var(--snow);padding:10px 12px;border-radius:var(--r-sm);border-left:2px solid var(--silver);margin-bottom:8px">{{ note.observations }}</div>
+                <div v-if="note.next_steps">
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:4px">Remarks</div>
+                  <div style="font-size:13px;color:var(--slate)">{{ note.next_steps }}</div>
+                </div>
+                <div style="font-size:11px;color:var(--fog);margin-top:6px">Recorded by {{ note.recorded_by?.name }}</div>
+              </div>
+              <div v-if="sessionNotesTotalPages > 1" style="padding:10px 18px;display:flex;justify-content:space-between;align-items:center;gap:10px">
+                <button class="ibtn ibtn-o ibtn-sm" :disabled="sessionNotesPage === 1" @click="sessionNotesPage--">Prev</button>
+                <span style="font-size:11.5px;color:var(--fog)">Page {{ sessionNotesPage }} of {{ sessionNotesTotalPages }}</span>
+                <button class="ibtn ibtn-o ibtn-sm" :disabled="sessionNotesPage === sessionNotesTotalPages" @click="sessionNotesPage++">Next</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Follow-up Session - Student Information Files only. Removed
+               entirely for an Incident Report. -->
+          <div class="icard" v-if="fromCases && !isIncidentReport">
+            <div class="icard-header">
+              <span class="icard-title">Follow-up Session</span>
+              <button v-if="isGCU && !isResolved && canEditSif" class="ibtn ibtn-p ibtn-sm" @click="openFollowUpModal">
+                <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Schedule Follow-up
+              </button>
+              <div v-else-if="isGCU && !isResolved && !canEditSif" style="font-size:11px;color:var(--stone)">
+                ⚠ Must be acknowledged with an attended appointment first
+              </div>
+            </div>
+            <div v-if="followUps.length === 0" class="empty-state">
+              <h3>No follow-up scheduled</h3>
+              <p>Schedule a follow-up session to keep tracking this referral.</p>
+            </div>
+            <div v-else>
+              <div
+                v-for="fu in pagedFollowUps"
+                :key="fu.id"
+                style="padding:14px 18px;border-bottom:1px solid var(--cloud);display:flex;justify-content:space-between;align-items:flex-start;gap:12px;cursor:pointer;transition:background .1s"
+                @mouseover="$event.currentTarget.style.background='var(--foam)'"
+                @mouseleave="$event.currentTarget.style.background='transparent'"
+                @click="viewFollowUp(fu)"
+              >
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:var(--ink)">{{ formatDate(fu.appointment_date) }} · {{ formatTime12(fu.start_time) }}-{{ formatTime12(fu.end_time) }}</div>
+                  <div style="font-size:12px;color:var(--stone);margin-top:2px">With {{ fu.staff?.name || 'TBA' }}</div>
+                  <div v-if="fu.notes" style="font-size:12px;color:var(--slate);margin-top:6px;background:var(--snow);padding:8px 10px;border-radius:var(--r-sm);border-left:2px solid var(--silver)">{{ fu.notes }}</div>
+                  <div v-else style="font-size:11px;color:var(--fog);margin-top:6px;font-style:italic">{{ isGCU && !isResolved ? 'No notes yet - click to add' : 'No notes recorded' }}</div>
+                  <div v-if="fu.created_by" style="font-size:10.5px;color:var(--fog);margin-top:4px">Recorded by {{ fu.created_by?.name }}</div>
+                </div>
+                <span class="ibadge" :class="'ibadge-' + fu.status">{{ toTitleCase(fu.status) }}</span>
+              </div>
+              <div v-if="followUpsTotalPages > 1" style="padding:10px 18px;display:flex;justify-content:space-between;align-items:center;gap:10px">
+                <button class="ibtn ibtn-o ibtn-sm" :disabled="followUpsPage === 1" @click="followUpsPage--">Prev</button>
+                <span style="font-size:11.5px;color:var(--fog)">Page {{ followUpsPage }} of {{ followUpsTotalPages }}</span>
+                <button class="ibtn ibtn-o ibtn-sm" :disabled="followUpsPage === followUpsTotalPages" @click="followUpsPage++">Next</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Right - floating/sticky so the Case Action buttons and the
+             Appointments card (Student Attended / No-Show / Request
+             Reschedule, etc.) stay reachable while scrolling the much
+             longer left column, instead of scrolling out of view. No
+             max-height/overflow-y here on purpose - that combination made
+             this column scroll internally on top of the page's own scroll,
+             which felt like the sidebar "stops and moves again" instead of
+             a single smooth scroll. Plain sticky lets it scroll normally
+             with the page until it reaches top:16px, then hold there. -->
+        <div style="display:flex;flex-direction:column;gap:16px;position:sticky;top:16px;align-self:start">
+
+          <!-- Acknowledge - visible to Admin and GCU Staff for ordinary
+               referrals; a psychological_testing referral (the shared
+               GCU<->TMDU referral created by "Refer to TMDU") is instead
+               acknowledged by TMDU staff, since it's their side of the
+               workflow. Acknowledging is a Referral Queue action; Case
+               Files/Student Information Files opens this page read-only,
+               so the prompt is hidden there. -->
+          <div class="icard" v-if="referral.status === 'submitted' && canAcknowledge && !fromCases && !referral.is_archived">
+            <div class="icard-body">
+              <div style="background:var(--amber-lt);border:1px solid var(--amber);border-radius:var(--r-sm);padding:10px 12px;font-size:12px;color:var(--amber);margin-bottom:12px">
+                ⚠ This referral has not been acknowledged yet.
+              </div>
+              <button class="ibtn ibtn-p" style="width:100%;justify-content:center" @click="acknowledge" :disabled="acknowledging">
+                <svg v-if="!acknowledging" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                <span v-if="acknowledging" style="width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:inline-block"></span>
+                {{ acknowledging ? 'Acknowledging...' : 'Acknowledge Referral' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Read-only status for roles that can't acknowledge this referral -->
+          <div class="icard" v-else-if="referral.status === 'submitted' && !fromCases">
+            <div class="icard-body">
+              <div style="font-size:13px;color:var(--stone)">
+                Awaiting acknowledgement from {{ referral.testing_record ? 'TMDU' : 'GCU' }}.
+              </div>
+            </div>
+          </div>
+
+          <!-- Acknowledged - stays visible on the Referral Queue page once the
+               referral has moved past "submitted", instead of just vanishing. -->
+          <div class="icard" v-else-if="!fromCases">
+            <div class="icard-body">
+              <div style="background:var(--mist);border:1px solid var(--mint);border-radius:var(--r-sm);padding:10px 12px;font-size:12px;color:var(--moss);display:flex;align-items:center;gap:8px">
+                <svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;flex-shrink:0"><polyline points="20 6 9 17 4 12"/></svg>
+                Acknowledged{{ referral.acknowledged_at ? ' on ' + formatDate(referral.acknowledged_at) : '' }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Student Info -->
+          <div class="icard">
+            <div class="icard-header">
+              <span class="icard-title">Student</span>
+              <button v-if="isGCU" class="ibtn ibtn-g ibtn-sm" @click="showProfileModal = true">Profile</button>
+            </div>
+            <div class="icard-body" style="display:flex;flex-direction:column;gap:10px">
+              <div style="display:flex;align-items:center;gap:10px">
+                <div class="qav" style="width:40px;height:40px;font-size:15px">
+                  {{ initials(referral.student?.first_name, referral.student?.last_name) }}
+                </div>
+                <div>
+                  <div style="font-size:13.5px;font-weight:600;color:var(--ink)">
+                    {{ referral.student?.last_name }}, {{ referral.student?.first_name }} {{ referral.student?.middle_name }}
+                  </div>
+                  <div style="font-size:11px;color:var(--fog);font-family:var(--mono)">{{ referral.student?.student_id }}</div>
+                </div>
+              </div>
+              <div>
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Year & College</div>
+                <div style="font-size:13px;color:var(--ink)">{{ referral.student?.year_level }} · {{ referral.student?.college }}</div>
+              </div>
+              <div v-if="referral.student?.program">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Program</div>
+                <div style="font-size:13px;color:var(--ink)">{{ referral.student?.program }}</div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Student Profile Modal - shows the full profile (incl. the new
+               Family/Siblings/Educational Attainment fields the student
+               fills in on their own account page) without navigating away
+               from the SIF. Family/Siblings/Education are collapsible
+               dropdown groups, matching the "Related Concerns Comparison"
+               pattern on the Student Profile page, since there can be a
+               variable (and sometimes empty) amount of each. Read-only here -
+               staff edit the base profile via the Student/Client module. -->
+          <div v-if="showProfileModal && isGCU" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showProfileModal = false">
+            <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:560px;overflow:hidden;box-shadow:var(--sh-lg);max-height:90vh;display:flex;flex-direction:column">
+              <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+                <div style="font-size:15px;font-weight:600;color:var(--ink)">Student Profile</div>
+                <button class="ibtn ibtn-g ibtn-sm" @click="showProfileModal = false">✕</button>
+              </div>
+              <div style="padding:22px;display:flex;flex-direction:column;gap:14px;overflow-y:auto">
+
+                <div style="display:flex;align-items:center;gap:10px">
+                  <div class="qav" style="width:44px;height:44px;font-size:16px">
+                    {{ initials(referral.student?.first_name, referral.student?.last_name) }}
+                  </div>
+                  <div>
+                    <div style="font-size:14.5px;font-weight:600;color:var(--ink)">
+                      {{ referral.student?.last_name }}, {{ referral.student?.first_name }} {{ referral.student?.middle_name }}
+                    </div>
+                    <div style="font-size:11px;color:var(--fog);font-family:var(--mono)">{{ referral.student?.student_id }}</div>
+                  </div>
+                </div>
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                  <div>
+                    <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">College</div>
+                    <div style="font-size:13px;color:var(--ink)">{{ referral.student?.college || '-' }}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Program</div>
+                    <div style="font-size:13px;color:var(--ink)">{{ referral.student?.program || '-' }}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Year Level</div>
+                    <div style="font-size:13px;color:var(--ink)">{{ referral.student?.year_level || '-' }}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Section</div>
+                    <div style="font-size:13px;color:var(--ink)">{{ referral.student?.section || '-' }}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Sex</div>
+                    <div style="font-size:13px;color:var(--ink)">{{ referral.student?.sex || '-' }}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Contact</div>
+                    <div style="font-size:13px;color:var(--ink)">{{ referral.student?.contact_number || '-' }}</div>
+                  </div>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Email</div>
+                  <div style="font-size:13px;color:var(--ink)">{{ referral.student?.email || '-' }}</div>
+                </div>
+
+                <div style="height:1px;background:var(--cloud)"></div>
+
+                <div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog)">Guardian</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                  <div>
+                    <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Full Name</div>
+                    <div style="font-size:13px;color:var(--ink)">
+                      {{ [referral.student?.guardian_last_name, referral.student?.guardian_first_name].filter(Boolean).length
+                          ? `${referral.student?.guardian_last_name || ''}, ${referral.student?.guardian_first_name || ''} ${referral.student?.guardian_middle_name || ''}`.trim()
+                          : '-' }}
+                    </div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Relationship</div>
+                    <div style="font-size:13px;color:var(--ink)">{{ referral.student?.guardian_relationship || '-' }}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Contact</div>
+                    <div style="font-size:13px;color:var(--ink)">{{ referral.student?.guardian_contact || '-' }}</div>
+                  </div>
+                </div>
+
+                <div style="height:1px;background:var(--cloud)"></div>
+
+                <!-- Collapsible groups, same interaction as Related Concerns
+                     Comparison: chevron rotates, count badge always visible. -->
+                <div v-for="group in profileDetailGroups" :key="group.key">
+                  <div
+                    style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0"
+                    @click="toggleProfileGroup(group.key)"
+                  >
+                    <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:var(--stone);fill:none;stroke-width:2;transition:transform .15s;flex-shrink:0" :style="{ transform: expandedProfileGroups[group.key] ? 'rotate(90deg)' : 'rotate(0deg)' }"><polyline points="9 18 15 12 9 6"/></svg>
+                    <div style="font-size:12.5px;font-weight:700;color:var(--ink)">{{ group.label }}</div>
+                    <span class="ibadge" style="background:var(--mist);color:var(--moss)">{{ group.count }}</span>
+                  </div>
+                  <div v-if="expandedProfileGroups[group.key]" style="padding:4px 0 10px 22px;display:flex;flex-direction:column;gap:10px">
+
+                    <!-- Family Information -->
+                    <template v-if="group.key === 'family'">
+                      <div v-if="!group.count" style="font-size:12.5px;color:var(--fog)">No family information provided.</div>
+                      <div v-else style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                        <div>
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Father's Name</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ fullName(referral.student?.father_last_name, referral.student?.father_first_name, referral.student?.father_middle_name) }}</div>
+                        </div>
+                        <div>
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Father's Occupation</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.father_occupation || '-' }}</div>
+                        </div>
+                        <div>
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Father's Contact</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.father_contact_number || '-' }}</div>
+                        </div>
+                        <div>
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Mother's Name</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ fullName(referral.student?.mother_last_name, referral.student?.mother_first_name, referral.student?.mother_middle_name) }}</div>
+                        </div>
+                        <div>
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Mother's Occupation</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.mother_occupation || '-' }}</div>
+                        </div>
+                        <div>
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Mother's Contact</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.mother_contact_number || '-' }}</div>
+                        </div>
+                      </div>
+                    </template>
+
+                    <!-- Siblings Information -->
+                    <template v-else-if="group.key === 'siblings'">
+                      <div v-if="!profileSiblings.length" style="font-size:12.5px;color:var(--fog)">No siblings information provided.</div>
+                      <!-- Same label-over-value layout as Family Information above. -->
+                      <div v-else style="display:flex;flex-direction:column;gap:14px">
+                        <div v-for="(s, i) in profileSiblings" :key="i" style="display:flex;flex-direction:column;gap:10px" :style="i ? 'border-top:1px solid var(--cloud);padding-top:12px' : ''">
+                          <div>
+                            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">{{ profileSiblings.length > 1 ? `Sibling ${i + 1}'s Name` : "Sibling's Name" }}</div>
+                            <div style="font-size:13px;color:var(--ink)">{{ fullName(s.last_name, s.first_name, s.middle_name) }}</div>
+                          </div>
+                          <div>
+                            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Age</div>
+                            <div style="font-size:13px;color:var(--ink)">{{ s.age || '-' }}</div>
+                          </div>
+                          <div>
+                            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Occupation / School</div>
+                            <div style="font-size:13px;color:var(--ink)">{{ s.occupation || '-' }}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+
+                    <!-- Educational Attainment -->
+                    <template v-else-if="group.key === 'education'">
+                      <div v-if="!group.count" style="font-size:12.5px;color:var(--fog)">No educational attainment information provided.</div>
+                      <div v-else style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                        <div>
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Elementary</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.elementary_school || '-' }}</div>
+                        </div>
+                        <div>
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Year Graduated</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.elementary_year_graduated || '-' }}</div>
+                        </div>
+                        <div style="grid-column:1 / -1">
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Elementary Awards / Achievements</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.elementary_achievements || '-' }}</div>
+                        </div>
+                        <div>
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Junior High School</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.high_school || '-' }}</div>
+                        </div>
+                        <div>
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Year Graduated</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.high_school_year_graduated || '-' }}</div>
+                        </div>
+                        <div style="grid-column:1 / -1">
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Junior High Awards / Achievements</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.high_school_achievements || '-' }}</div>
+                        </div>
+                        <div>
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Senior High School</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.senior_high_school || '-' }}</div>
+                        </div>
+                        <div>
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Year Graduated</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.senior_high_year_graduated || '-' }}</div>
+                        </div>
+                        <div style="grid-column:1 / -1">
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Senior High Awards / Achievements</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.senior_high_achievements || '-' }}</div>
+                        </div>
+                        <div>
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">College</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.college_school || '-' }}</div>
+                        </div>
+                        <div>
+                          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Year Graduated</div>
+                          <div style="font-size:13px;color:var(--ink)">{{ referral.student?.college_year_graduated || '-' }}</div>
+                        </div>
+                      </div>
+                    </template>
+
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+          <!-- Case Action - Student Information Files only. Removed entirely
+               for an Incident Report. Once resolved (isResolved), this whole
+               card collapses to a view-only notice - no further SIF action
+               (scheduling, referring to TMDU, or re-resolving) is available. -->
+          <div class="icard" v-if="isGCU && referral.case && fromCases && !isIncidentReport">
+            <div class="icard-header"><span class="icard-title">Case Action</span></div>
+            <div class="icard-body" style="display:flex;flex-direction:column;gap:12px;padding:18px">
+              <div v-if="isResolved" style="padding:8px 12px;background:var(--mist);border-radius:var(--r-sm);font-size:12px;color:var(--moss);text-align:center">
+                ✓ {{ lockedText }}
+              </div>
+              <template v-else>
+                <router-link
+                  v-if="referral.status !== 'submitted'"
+                  :to="{ name: 'appointments', query: { return_to: route.fullPath } }"
+                  class="ibtn ibtn-blue"
+                  style="width:100%;justify-content:center"
+                >
+                  <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                  Schedule Appointment
+                </router-link>
+                <div v-else style="padding:8px 12px;background:var(--cloud);border-radius:var(--r-sm);font-size:12px;color:var(--stone);text-align:center">
+                  ⚠ Acknowledge referral first
+                </div>
+                <!-- Class Admission Slip referrals: issue the slip right from here. -->
+                <button
+                  v-if="isClassAttendance && canEditSif && !admission_excused_locked && !isResolved"
+                  class="ibtn ibtn-o"
+                  style="width:100%;justify-content:center"
+                  @click="openAdmissionSlip"
+                >
+                  <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  {{ referral.admission_issued_at ? 'Update Admission Slip' : 'Issue Admission Slip' }}
+                </button>
+                <template v-if="fromCases">
+                  <!-- "Refer to TMDU" creates a separate, sibling Referral
+                       (referral_type psychological_testing) on this same case
+                       - see CaseController::referToTmdu(). This referral's own
+                       testing_record field is never populated (that lives on
+                       the sibling), so this checks tmduTestingRecord (the
+                       sibling's testing record, same computed the PAR Results
+                       card uses) instead. Also gated on hasAttendedAppointment -
+                       an appointment must be set AND attended before the case
+                       can be escalated, same gate the backend enforces. -->
+                  <!-- One slot: "Refer to TMDU" until the referral has been sent, then
+                       it is replaced by "View Case Referral". -->
+                  <button v-if="referredToTmdu" class="ibtn ibtn-o" style="width:100%;justify-content:center" @click="openSlipModal">
+                    <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    View Case Referral
+                  </button>
+                  <template v-else>
+                    <div v-if="!canEditSif" style="padding:8px 12px;background:var(--cloud);border-radius:var(--r-sm);font-size:12px;color:var(--stone);text-align:center">
+                      ⚠ This referral must be acknowledged and have an appointment set and attended before referring to TMDU
+                    </div>
+                    <button
+                      v-else
+                      class="ibtn ibtn-o"
+                      style="width:100%;justify-content:center"
+                      @click="openTmduModal"
+                    >
+                      <svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                      Refer to TMDU
+                    </button>
+                  </template>
+
+                  <div v-if="!canEditSif" style="padding:8px 12px;background:var(--cloud);border-radius:var(--r-sm);font-size:12px;color:var(--stone);text-align:center">
+                    ⚠ This referral must be acknowledged and have an appointment set and attended before resolving
+                  </div>
+                  <div v-else-if="!sessionNotes.length" style="padding:8px 12px;background:var(--cloud);border-radius:var(--r-sm);font-size:12px;color:var(--stone);text-align:center">
+                    ⚠ Add at least one session note before resolving
+                  </div>
+                  <button
+                    v-else
+                    class="ibtn ibtn-p"
+                    style="width:100%;justify-content:center"
+                    @click="showResolveReferralModal = true"
+                  >
+                    <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    Resolve Referral
+                  </button>
+
+                  <!-- Own section, not just another button in the same
+                       stack - a divider and some breathing room so it
+                       reads as a separate, deliberate action instead of
+                       being crammed in at the bottom of the card. -->
+                  <div style="border-top:1px solid var(--cloud);margin-top:4px;padding-top:14px">
+                    <button
+                      class="ibtn ibtn-o"
+                      style="width:100%;justify-content:center;padding:12px 16px"
+                      @click="openParentConferenceModal"
+                    >
+                      <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                      Issue Parent Conference Slip
+                    </button>
+                  </div>
+                </template>
+              </template>
+            </div>
+          </div>
+
+
+          <!-- Appointments (scoped to this referral only) - Student
+               Information Files only. Removed entirely for an Incident
+               Report. -->
+          <div class="icard" v-if="referral.case && fromCases && !isIncidentReport">
+            <div class="icard-header"><span class="icard-title">Appointments</span></div>
+            <div v-if="!referralAppointments.length" class="empty-state">
+              <h3>No appointments yet</h3>
+              <p>No appointments have been scheduled for this referral.</p>
+            </div>
+            <div v-else>
+              <!-- Clicking the card opens the Appointment Details modal below
+                   (openApptDetail) so staff can confirm/check-in/no-show/
+                   cancel right here, without leaving the SIF for the
+                   Appointments page - requested so there's at least a choice
+                   instead of always having to go to the sidebar. The
+                   existing No-Show button keeps working on its own
+                   (@click.stop so it doesn't also pop the modal open). -->
+              <div
+                v-for="a in referralAppointments"
+                :key="a.id"
+                style="padding:12px 18px;border-bottom:1px solid var(--cloud);display:flex;flex-direction:column;gap:6px;cursor:pointer"
+                @click="openApptDetail(a)"
+              >
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+                  <div>
+                    <div style="font-size:12.5px;font-weight:600;color:var(--ink)">{{ toTitleCase(a.appointment_type) }}</div>
+                    <!-- Acknowledging a referral creates this row right away
+                         as a placeholder carrying a scheduling link - it has
+                         a real appointment_date/start_time in the database
+                         (has to, it's a non-null column) but the student
+                         hasn't actually picked anything yet while
+                         request_status is still 'awaiting_student'. Showing
+                         that placeholder date as if it were real made it
+                         look like an appointment was already set. -->
+                    <div v-if="isApptExpired(a)" style="font-size:11px;color:var(--red);margin-top:2px">
+                      Student's scheduling link expired - Schedule Now to set it manually
+                    </div>
+                    <div v-else-if="a.request_status === 'awaiting_student'" style="font-size:11px;color:var(--amber);margin-top:2px">
+                      Waiting for Student to Pick a Schedule
+                    </div>
+                    <div v-else style="font-size:11px;color:var(--stone);margin-top:2px">{{ formatDate(a.appointment_date) }} · {{ formatTime12(a.start_time) }}</div>
+                    <span class="ibadge" :class="'unit-' + a.unit?.toLowerCase()" style="margin-top:4px;display:inline-block">{{ a.unit }}</span>
+                  </div>
+                  <span class="ibadge" :class="isApptExpired(a) ? 'ibadge-expired' : 'ibadge-' + a.status">{{ isApptExpired(a) ? 'Expired' : toTitleCase(a.status) }}</span>
+                </div>
+                <div style="font-size:11px;color:var(--fog)">With {{ a.staff?.name || '-' }}</div>
+                <button v-if="isGCU && a.status === 'confirmed'" class="ibtn ibtn-sm" style="background:var(--amber-lt);color:var(--amber);border:1.5px solid var(--amber);align-self:flex-start" @click.stop="openCaseNoShowModal(a)">No-Show</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Parent Conference (scoped to the case, same as Appointments) -
+               Student Information Files only. Removed entirely for an
+               Incident Report. -->
+          <div class="icard" v-if="referral.case && fromCases && !isIncidentReport">
+            <div class="icard-header">
+              <span class="icard-title">Parent Conference</span>
+              <button v-if="isGCU && !isResolved && canEditSif" class="ibtn ibtn-p ibtn-sm" @click="openParentConferenceModal">
+                <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Issue Slip
+              </button>
+            </div>
+            <div v-if="!referralParentConferenceSlips.length" class="empty-state">
+              <h3>No parent conference slips yet</h3>
+              <p>No Parent Conference Slip has been issued for this referral.</p>
+            </div>
+            <div v-else>
+              <div
+                v-for="s in referralParentConferenceSlips"
+                :key="s.id"
+                style="padding:12px 18px;border-bottom:1px solid var(--cloud);cursor:pointer;transition:background .1s"
+                @mouseover="$event.currentTarget.style.background='var(--foam)'"
+                @mouseleave="$event.currentTarget.style.background='transparent'"
+                @click="viewParentConference(s)"
+              >
+                <div style="font-size:12.5px;font-weight:600;color:var(--ink)">{{ formatDate(s.conference_date) }} · {{ formatTime12(s.conference_time) }}</div>
+                <div style="font-size:12px;color:var(--slate);margin-top:3px">{{ s.reason }}</div>
+                <div v-if="s.remarks" style="font-size:11px;color:var(--stone);margin-top:3px;font-style:italic">{{ s.remarks }}</div>
+                <div v-if="s.notes" style="font-size:12px;color:var(--slate);margin-top:6px;background:var(--snow);padding:8px 10px;border-radius:var(--r-sm);border-left:2px solid var(--silver)">{{ s.notes }}</div>
+                <div v-else style="font-size:11px;color:var(--fog);margin-top:6px;font-style:italic">{{ isGCU && !isResolved ? 'No notes yet - click to add' : 'No notes recorded' }}</div>
+                <div style="font-size:11px;color:var(--fog);margin-top:4px">Issued by {{ s.issued_by?.name }} · {{ formatDate(s.issued_at) }}</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Add Session Notes Modal -->
+      <div v-if="showSessionModal && isGCU && fromCases" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showSessionModal = false">
+        <div style="width:100%;max-width:520px;max-height:90vh;background:#fff;overflow-y:auto;border-radius:var(--r-lg);box-shadow:var(--sh-lg)">
+          <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1">
+            <div>
+              <div style="font-size:15px;font-weight:600;color:var(--ink)">Add Session Notes</div>
+              <div style="font-size:12px;color:var(--stone)">{{ referral.student?.last_name }}, {{ referral.student?.first_name }} {{ referral.student?.middle_name }} · {{ referral.referral_code }}</div>
+            </div>
+            <button class="ibtn ibtn-g ibtn-sm" @click="showSessionModal = false">✕</button>
+          </div>
+          <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+            <div>
+              <label class="ifl">Student Showed Up</label>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                <input v-model="sessionForm.student_showed_up" type="checkbox" id="ref-showed" style="width:15px;height:15px;accent-color:var(--moss)" @change="!sessionForm.student_showed_up && (sessionForm.interventions = '')" />
+                <label for="ref-showed" style="font-size:13px;color:var(--slate);cursor:pointer">Yes, student attended</label>
+              </div>
+            </div>
+            <div>
+              <label class="ifl">Interventions Applied<span v-if="sessionForm.student_showed_up" style="color:var(--red)"> *</span></label>
+              <textarea
+                v-model="sessionForm.interventions"
+                class="ifta"
+                style="min-height:60px"
+                maxlength="1000"
+                :disabled="!sessionForm.student_showed_up"
+                :placeholder="sessionForm.student_showed_up ? 'What interventions were applied?' : 'Not applicable - the student did not attend.'"
+                @input="sessionForm.interventions = plainText(sessionForm.interventions)"
+              ></textarea>
+            </div>
+            <div>
+              <label class="ifl">Remarks</label>
+              <textarea v-model="sessionForm.next_steps" class="ifta" style="min-height:60px" maxlength="1000" placeholder="Remarks..." @input="sessionForm.next_steps = plainText(sessionForm.next_steps)"></textarea>
+            </div>
+            <div style="display:flex;gap:8px;padding-top:8px">
+              <button class="ibtn ibtn-p" :disabled="sessionForm.student_showed_up && !sessionForm.interventions.trim()" @click="logSession">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                Save Notes
+              </button>
+              <button class="ibtn ibtn-o" @click="showSessionModal = false">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Schedule Follow-up Modal -->
+      <div v-if="showFollowUpModal && fromCases" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showFollowUpModal = false">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:480px;overflow:hidden;box-shadow:var(--sh-lg)">
+          <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <div style="font-size:15px;font-weight:600;color:var(--ink)">Schedule Follow-up Session</div>
+              <div style="font-size:12px;color:var(--stone)">Referral {{ referral.referral_code }}</div>
+            </div>
+            <button class="ibtn ibtn-g ibtn-sm" @click="showFollowUpModal = false">✕</button>
+          </div>
+          <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+            <div>
+              <label class="ifl">Date <span style="color:var(--red)">*</span></label>
+              <input v-model="followUpForm.appointment_date" type="date" class="ifi" :min="todayStr" />
+              <div v-if="followUpBlockedMsg" style="font-size:11px;color:var(--red);margin-top:4px">{{ followUpBlockedMsg }}</div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <label class="ifl">Start Time <span style="color:var(--red)">*</span></label>
+                <input v-model="followUpForm.start_time" type="time" class="ifi" min="08:00" max="16:00" />
+              </div>
+              <div>
+                <label class="ifl">End Time <span style="color:var(--red)">*</span></label>
+                <input v-model="followUpForm.end_time" type="time" class="ifi" min="08:00" max="16:00" />
+              </div>
+            </div>
+            <div>
+              <label class="ifl">Assigned Staff</label>
+              <select v-model="followUpForm.staff_user_id" class="ifse">
+                <option value="">Auto-assign (me)</option>
+                <option v-for="u in staffList" :key="u.id" :value="u.id">{{ u.name }}</option>
+              </select>
+            </div>
+            <div v-if="followUpForm.staff_user_id && followUpForm.appointment_date" style="font-size:12px;color:var(--stone);background:var(--cloud);border-radius:var(--r-sm);padding:10px 12px">
+              <div v-if="loadingFollowUpAvailability">Checking schedule...</div>
+              <template v-else>
+                <div style="font-weight:600;color:var(--ink);margin-bottom:4px">Schedule for {{ followUpForm.appointment_date }}</div>
+                <div v-if="followUpAvailability?.booked_slots?.length" style="display:flex;flex-direction:column;gap:2px">
+                  <div v-for="(slot, i) in followUpAvailability.booked_slots" :key="i" :style="isFollowUpOverlapping(slot) ? 'color:var(--red);font-weight:600' : ''">
+                    {{ formatTime12(slot.start_time) }}–{{ formatTime12(slot.end_time) }} · {{ toTitleCase(slot.appointment_type) }}
+                    <span v-if="isFollowUpOverlapping(slot)">(conflicts with this time)</span>
+                  </div>
+                </div>
+                <div v-else>No other appointments booked for this staff that day.</div>
+              </template>
+            </div>
+            <div>
+              <label class="ifl">Notes</label>
+              <textarea v-model="followUpForm.notes" class="ifta" style="min-height:60px" maxlength="1000" placeholder="What should this follow-up cover?"></textarea>
+            </div>
+            <div v-if="followUpError" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px">
+              {{ followUpError }}
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="ibtn ibtn-p" @click="openFollowUpConfirm">Schedule Follow-up</button>
+              <button class="ibtn ibtn-o" @click="showFollowUpModal = false">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Schedule Follow-up Confirmation Modal -->
+      <div v-if="showFollowUpConfirm" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:70;display:flex;align-items:center;justify-content:center;padding:20px">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:380px;padding:22px;text-align:center">
+          <div style="font-size:15px;font-weight:600;color:var(--ink);margin-bottom:10px">Schedule this follow-up?</div>
+          <div style="font-size:13px;color:var(--stone);line-height:1.6;margin-bottom:18px">
+            {{ formatDate(followUpForm.appointment_date) }} · {{ formatTime12(followUpForm.start_time) }}–{{ formatTime12(followUpForm.end_time) }}
+          </div>
+            <div style="display:flex;gap:8px">
+            <button class="ibtn ibtn-p" style="flex:1;justify-content:center" :disabled="schedulingFollowUp" @click="saveFollowUp">
+              {{ schedulingFollowUp ? 'Scheduling...' : 'Yes' }}
+            </button>
+            <button class="ibtn ibtn-o" style="flex:1;justify-content:center" @click="showFollowUpConfirm = false" :disabled="schedulingFollowUp">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- Close Case Modal -->
+
+      <!-- Send Feedback Confirmation Modal -->
+      <div v-if="showFeedbackConfirm" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:70;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showFeedbackConfirm = false">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:420px;padding:22px;text-align:center">
+          <div style="font-size:15px;font-weight:600;color:var(--ink);margin-bottom:10px">Send Feedback Slip?</div>
+          <div style="font-size:13px;color:var(--stone);line-height:1.6;margin-bottom:18px">
+            This will send the feedback slip for <strong>{{ referral.student?.last_name }}, {{ referral.student?.first_name }} {{ referral.student?.middle_name }}</strong> ({{ referral.student?.student_id }}) to the referrer. Please review what you've written before confirming.
+          </div>
+            <div style="display:flex;gap:8px">
+            <button class="ibtn ibtn-p" style="flex:1;justify-content:center" :disabled="sendingFeedback" @click="sendFeedback">
+              {{ sendingFeedback ? 'Sending...' : 'Yes' }}
+            </button>
+            <button class="ibtn ibtn-o" style="flex:1;justify-content:center" @click="showFeedbackConfirm = false" :disabled="sendingFeedback">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- View / Edit Follow-up Notes Modal -->
+      <div v-if="selectedFollowUp" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="closeFollowUpDetail">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:480px;overflow:hidden;box-shadow:var(--sh-lg)">
+          <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <div style="font-size:15px;font-weight:600;color:var(--ink)">Follow-up Session</div>
+              <div style="font-size:12px;color:var(--stone)">{{ formatDate(selectedFollowUp.appointment_date) }} · {{ formatTime12(selectedFollowUp.start_time) }}-{{ formatTime12(selectedFollowUp.end_time) }}</div>
+            </div>
+            <button class="ibtn ibtn-g ibtn-sm" @click="closeFollowUpDetail">✕</button>
+          </div>
+          <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Staff</div>
+                <div style="font-size:13px;color:var(--ink)">{{ selectedFollowUp.staff?.name || 'TBA' }}</div>
+              </div>
+              <div>
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Status</div>
+                <span class="ibadge" :class="'ibadge-' + selectedFollowUp.status">{{ toTitleCase(selectedFollowUp.status) }}</span>
+              </div>
+            </div>
+            <!-- This follow-up's own attendance gate - narrower than, and
+                 separate from, the referral-wide one: only THIS follow-up's
+                 notes are locked, and only until THIS follow-up's own
+                 checked_in is true. Scheduling or attending it never
+                 affects any other action on the SIF. -->
+            <div v-if="isGCU && !selectedFollowUp.checked_in" style="background:var(--red-lt);border:1px solid var(--red);border-radius:var(--r-sm);padding:8px 12px;font-size:12px;color:var(--red)">
+              The student has not yet attended this follow-up session. Notes can be added once attendance is confirmed.
+            </div>
+            <div v-if="isGCU && followUpNotesEditable">
+              <label class="ifl">Notes</label>
+              <textarea v-model="followUpNotesForm" class="ifta" style="min-height:90px" maxlength="1000" placeholder="Add notes for this follow-up session. Notes cannot be edited once saved." @input="followUpNotesForm = plainText(followUpNotesForm)" :disabled="!selectedFollowUp.checked_in"></textarea>
+            </div>
+            <div v-else>
+              <!-- Read-only: notes are write-once and cannot be edited after saving. -->
+              <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:4px">Notes</div>
+              <div v-if="selectedFollowUp.notes" style="font-size:13px;color:var(--slate);line-height:1.6;background:var(--snow);padding:10px 12px;border-radius:var(--r-sm);border-left:2px solid var(--silver)">{{ selectedFollowUp.notes }}</div>
+              <div v-else style="font-size:13px;color:var(--stone)">No notes recorded yet.</div>
+            </div>
+            <div v-if="selectedFollowUp.created_by" style="font-size:11px;color:var(--fog)">Recorded by {{ selectedFollowUp.created_by?.name }}</div>
+            <div v-if="isGCU && followUpNotesEditable" style="display:flex;gap:8px">
+              <button class="ibtn ibtn-p" @click="saveFollowUpNotes" :disabled="!selectedFollowUp.checked_in || !followUpNotesForm.trim()">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                Save Notes
+              </button>
+              <button class="ibtn ibtn-o" @click="closeFollowUpDetail">Cancel</button>
+            </div>
+            <div v-else style="display:flex;gap:8px;align-items:center">
+              <button class="ibtn ibtn-o" @click="closeFollowUpDetail">Close</button>
+              <span v-if="selectedFollowUp.notes" style="font-size:11px;color:var(--fog)">Saved notes can no longer be edited.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Request Cancellation/Void of Referral (referrer, after acknowledgement) -->
+      <div v-if="showVoidModal" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showVoidModal = false">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:440px;overflow:hidden;box-shadow:var(--sh-lg)">
+          <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between">
+            <div style="font-size:15px;font-weight:600;color:var(--ink)">Request Cancellation/Void of Referral</div>
+            <button class="ibtn ibtn-g ibtn-sm" @click="showVoidModal = false">✕</button>
+          </div>
+          <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+            <div style="font-size:12px;color:var(--stone);line-height:1.6">This referral has already been acknowledged, so it can no longer be deleted directly. Explain why it should be cancelled - the reviewing unit will approve or deny this request.</div>
+            <div>
+              <label class="ifl">Reason</label>
+              <textarea v-model="voidReason" class="ifta" style="min-height:100px" maxlength="1000" placeholder="e.g. filed for the wrong student, duplicate referral, issue already resolved directly..."></textarea>
+            </div>
+            <div v-if="voidError" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px">{{ voidError }}</div>
+            <div style="display:flex;gap:8px">
+              <button class="ibtn ibtn-p" style="flex:1;justify-content:center" :disabled="requestingVoid" @click="submitVoidRequest">{{ requestingVoid ? 'Submitting...' : 'Submit Request' }}</button>
+              <button class="ibtn ibtn-o" style="flex:1;justify-content:center" :disabled="requestingVoid" @click="showVoidModal = false">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Edit Referral (referrer only, until GCU acknowledges it) -->
+      <!-- Bug (10/30/2026): this form is long (concern, disciplinary fields,
+           Change Student, 6 student-info fields) and the box had no
+           max-height - on a short mobile viewport it just grew taller than
+           the screen with nothing to scroll (the outer overlay centers it
+           but never scrolls), so Save Changes/Cancel at the very bottom
+           were pushed off-screen and completely unreachable. Switched to
+           the same max-height + scrollable-body + sticky-footer pattern
+           already used by the Refer to TMDU modal below (and Student
+           Profile above) - header and footer stay fixed, only the middle
+           scrolls, so the buttons are always visible regardless of form
+           length or screen height. -->
+      <div v-if="showReferralEdit" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showReferralEdit = false">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:480px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:var(--sh-lg)">
+          <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+            <div style="font-size:15px;font-weight:600;color:var(--ink)">Edit Referral</div>
+            <button class="ibtn ibtn-g ibtn-sm" @click="showReferralEdit = false">✕</button>
+          </div>
+          <div style="padding:22px;display:flex;flex-direction:column;gap:14px;overflow-y:auto">
+            <div style="background:var(--blue-lt);border:1px solid var(--blue);border-radius:var(--r-sm);padding:10px 12px;font-size:12px;color:var(--blue)">
+              You can change this referral until it is acknowledged.
+            </div>
+            <!-- Student info - fixes a typo or wrong detail the referrer just
+                 entered themselves; same pre-acknowledgement window as the
+                 rest of this form. Does not touch Student ID, College,
+                 Section or contact/guardian info - those stay the Students
+                 module's own (Admin/GCU Staff only). -->
+            <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog)">Student Info</div>
+              <div style="flex:1;height:1px;background:var(--cloud)"></div>
+            </div>
+
+            <!-- Referred the wrong student entirely - separate from the name/
+                 details fields below, since switching students moves this
+                 referral onto a different Student Information File (see
+                 reassignStudent() / ReferralController::reassignStudent()).
+                 Takes effect immediately on pick, not on Save Changes. -->
+            <div v-if="!showChangeStudent">
+              <button type="button" class="ibtn ibtn-o ibtn-sm" :disabled="reassigningStudent" @click="showChangeStudent = true">Referred the wrong student? Change Student</button>
+            </div>
+              <div v-else style="position:relative;display:flex;flex-direction:column;gap:6px; margin-top: 4px;">
+              <label class="ifl">Search for the correct student</label>
+              <div class="sw" style="width: 100%;">
+                <svg class="sw-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input
+                  v-model="changeStudentQuery"
+                  class="sin"
+                  style="width: 100%;"
+                  placeholder="Search student name or ID..."
+                  maxlength="100"
+                  :disabled="reassigningStudent"
+                  @input="onChangeStudentSearch"
+                  @focus="showChangeStudentDropdown = changeStudentSuggestions.length > 0"
+                  autocomplete="off"
+                />
+              </div>
+              
+              <div v-if="changeStudentQuery.length >= 1" style="position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid var(--cloud);border-radius:var(--r-sm);box-shadow:var(--sh-lg);z-index:50;max-height:200px;overflow-y:auto">
+                
+                <div v-if="searchingStudents" style="padding:14px; text-align:center; font-size:12px; color:var(--fog);">
+                  Searching...
+                </div>
+                <div v-else-if="!changeStudentSuggestions.length" style="padding:14px; text-align:center; font-size:12px; color:var(--fog);">
+                  No students found.
+                </div>
+                <div v-else v-for="s in changeStudentSuggestions" :key="s.id" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--cloud)" @mouseover="$event.currentTarget.style.background='var(--foam)'" @mouseleave="$event.currentTarget.style.background='#fff'" @click="pickChangeStudent(s)">
+                  <div style="font-size:13px;font-weight:600;color:var(--ink)">{{ s.last_name }}, {{ s.first_name }} {{ s.middle_name }}</div>
+                  <div style="font-size:11px;color:var(--fog);font-family:var(--mono)">{{ s.student_id }} · {{ s.college || '-' }}</div>
+                </div>
+              </div>
+              
+              <div v-if="changeStudentError" style="font-size:11px;color:var(--red)">{{ changeStudentError }}</div>
+              <button type="button" class="ibtn ibtn-o ibtn-sm" style="align-self:flex-start" :disabled="reassigningStudent" @click="showChangeStudent = false; changeStudentQuery = ''; changeStudentSuggestions = []; changeStudentError = ''">Cancel</button>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div>
+                <label class="ifl">Last Name</label>
+                <input v-model="studentEditForm.last_name" class="ifi" maxlength="255" />
+              </div>
+              <div>
+                <label class="ifl">First Name</label>
+                <input v-model="studentEditForm.first_name" class="ifi" maxlength="255" />
+              </div>
+              <div>
+                <label class="ifl">Middle Name</label>
+                <input v-model="studentEditForm.middle_name" class="ifi" maxlength="255" />
+              </div>
+              <div>
+                <label class="ifl">Suffix</label>
+                <input v-model="studentEditForm.suffix" class="ifi" maxlength="20" placeholder="e.g. Jr." />
+              </div>
+              <div>
+                <label class="ifl">Sex</label>
+                <select v-model="studentEditForm.sex" class="ifse">
+                  <option value="">-</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Prefer not to say">Prefer not to say</option>
+                </select>
+              </div>
+              <div>
+                <label class="ifl">Year Level</label>
+                <select v-model="studentEditForm.year_level" class="ifse">
+                  <option value="" disabled hidden>Select...</option>
+                  <option v-for="n in 10" :key="n" :value="String(n)">{{ n }}</option>
+                </select>
+              </div>
+                            <div style="grid-column:1 / -1">
+                <label class="ifl">College</label>
+                <select v-model="studentEditForm.college" class="ifse" @change="studentEditForm.program = ''">
+                  <option value="">-</option>
+                  <option v-if="studentEditForm.college && !Object.keys(studentEditProgramsByCollege).includes(studentEditForm.college)" :value="studentEditForm.college">{{ studentEditForm.college }} (unrecognized)</option>
+                  <option v-for="c in Object.keys(studentEditProgramsByCollege)" :key="c" :value="c">{{ c }}</option>
+                </select>
+              </div>
+              <div style="grid-column:1 / -1">
+                <label class="ifl">Program</label>
+                <select v-model="studentEditForm.program" class="ifse">
+                  <option value="">-</option>
+                  <option v-if="studentEditForm.program && !studentEditPrograms.includes(studentEditForm.program)" :value="studentEditForm.program">{{ studentEditForm.program }}</option>
+                  <option v-for="p in studentEditPrograms" :key="p" :value="p">{{ p }}</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- MOVED CONCERN SECTION HERE -->
+            <div style="margin-top: 10px;">
+              <label class="ifl">Concern / Reason for Referral</label>
+              <textarea v-model="referralEditForm.nature_of_concern" class="ifta" style="min-height:110px" maxlength="1000"></textarea>
+            </div>
+            <template v-if="referral.referral_type === 'disciplinary'">
+              <div>
+                <label class="ifl">Date of Incident</label>
+                <input v-model="referralEditForm.incident_date" type="date" class="ifi" style="width:100%" />
+              </div>
+              <div>
+                <label class="ifl">Incident Description</label>
+                <textarea v-model="referralEditForm.incident_description" class="ifta" style="min-height:80px" maxlength="2000"></textarea>
+              </div>
+            </template>
+
+            <div v-if="referralEditError" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px">{{ referralEditError }}</div>
+          </div>
+          <div style="padding:14px 22px;border-top:1px solid var(--cloud);background:var(--snow);display:flex;gap:8px;flex-shrink:0">
+            <button class="ibtn ibtn-p" style="flex:1;justify-content:center" @click="saveReferralEdit">Save Changes</button>
+            <button class="ibtn ibtn-o" style="flex:1;justify-content:center" :disabled="savingReferralEdit" @click="showReferralEdit = false">Cancel</button>
+          </div>
+                </div>
+      </div>
+
+      <!-- Confirm Edit Preview Modal -->
+      <div v-if="showEditConfirm" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:70;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showEditConfirm = false">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:600px;overflow:hidden;box-shadow:var(--sh-lg);max-height:90vh;overflow-y:auto">
+          <div style="padding:20px 22px;border-bottom:1px solid var(--cloud)">
+            <div style="font-size:15px;font-weight:600;color:var(--ink)">Confirm Changes</div>
+          </div>
+          <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+            <div style="font-size:13px;color:var(--stone)">
+              You are about to save <strong>{{ editChanges.length }}</strong> change{{ editChanges.length === 1 ? '' : 's' }} to this referral:
+            </div>
+            <div style="border:1px solid var(--cloud);border-radius:var(--r-sm);overflow:hidden">
+              <table style="width:100%;border-collapse:collapse;font-size:13px">
+                <thead>
+                  <tr style="background:var(--snow)">
+                    <th style="text-align:left;padding:8px 12px;font-weight:600;color:var(--stone);font-size:11px;text-transform:uppercase">Field</th>
+                    <th style="text-align:left;padding:8px 12px;font-weight:600;color:var(--stone);font-size:11px;text-transform:uppercase">Before</th>
+                    <th style="text-align:left;padding:8px 12px;font-weight:600;color:var(--stone);font-size:11px;text-transform:uppercase">After</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="c in editChanges" :key="c.label" style="border-top:1px solid var(--cloud)">
+                    <td style="padding:8px 12px;color:var(--slate)">{{ c.label }}</td>
+                    <td style="padding:8px 12px;color:var(--red);text-decoration:line-through">{{ c.before }}</td>
+                    <td style="padding:8px 12px;color:var(--moss);font-weight:600">{{ c.after }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button class="ibtn ibtn-p" :disabled="savingReferralEdit" @click="executeReferralEdit">{{ savingReferralEdit ? 'Saving...' : 'Confirm & Save' }}</button>
+              <button class="ibtn ibtn-o" :disabled="savingReferralEdit" @click="showEditConfirm = false">Go Back & Edit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Refer to TMDU Modal: now a proper referral-slip form. Confirming
+           creates a real, shared Referral (psychological_testing) under the
+           same case, linked to a new TestingRecord - see
+           CaseController::referToTmdu(). -->
+      <div v-if="showTmduModal && fromCases" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showTmduModal = false">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:780px;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:var(--sh-lg)">
+          <div style="padding:18px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <div style="font-size:15px;font-weight:600;color:var(--ink)">Refer Student to TMDU</div>
+              <div style="font-size:11.5px;color:var(--fog);margin-top:2px">The same form as Refer a Student, filled in from this Student Information File.</div>
+            </div>
+            <button class="ibtn ibtn-g ibtn-sm" @click="showTmduModal = false">✕</button>
+          </div>
+
+          <!-- Document Code Header - read only; edited in Management by admin -->
+          <div class="doc-header-hidden" style="padding:10px 22px;border-bottom:1px solid var(--cloud);display:flex;justify-content:space-between;align-items:center;background:var(--snow)">
+            <div style="font-size:11px;color:var(--stone)">
+              <div><strong>Document Code:</strong> QF-OSS-01</div>
+              <div><strong>Revision No.:</strong> {{ referralDoc.revision_no || '01' }}</div>
+            </div>
+            <div style="font-size:11px;color:var(--stone);text-align:right">
+              <div><strong>Effectivity:</strong> {{ formatDocDate(referralDoc.effectivity_date) }}</div>
+              <div><strong>Ctrl No.:</strong> {{ referralDoc.ctrl_no || '-' }}</div>
+            </div>
+          </div>
+
+          <div class="tf" style="padding:18px 22px;overflow-y:auto">
+            <div class="tf-sec">Student Information</div>
+            <div class="tf-row">
+              <label class="ifl">Student ID</label>
+              <input class="ifi tf-ro" readonly tabindex="-1" :value="referral.student?.student_id" />
+            </div>
+            <div class="tf-grid tf-names">
+              <div><label class="ifl">Last Name</label><input class="ifi tf-ro" readonly tabindex="-1" :value="referral.student?.last_name" /></div>
+              <div><label class="ifl">First Name</label><input class="ifi tf-ro" readonly tabindex="-1" :value="referral.student?.first_name" /></div>
+              <div><label class="ifl">Middle Name</label><input class="ifi tf-ro" readonly tabindex="-1" :value="referral.student?.middle_name" /></div>
+              <div><label class="ifl">Suffix</label><input class="ifi tf-ro" readonly tabindex="-1" :value="referral.student?.suffix || 'None'" /></div>
+              <div><label class="ifl">Sex</label><input class="ifi tf-ro" readonly tabindex="-1" :value="referral.student?.sex" /></div>
+            </div>
+            <div class="tf-grid tf-two">
+              <div><label class="ifl">College</label><input class="ifi tf-ro" readonly tabindex="-1" :value="referral.student?.college" /></div>
+              <div><label class="ifl">Program</label><input class="ifi tf-ro" readonly tabindex="-1" :value="referral.student?.program" /></div>
+              <div><label class="ifl">Year Level</label><input class="ifi tf-ro" readonly tabindex="-1" :value="referral.student?.year_level" /></div>
+              <div><label class="ifl">Section</label><input class="ifi tf-ro" readonly tabindex="-1" :value="referral.student?.section" /></div>
+            </div>
+
+            <div class="tf-sec">Referred By</div>
+            <div class="tf-grid tf-three">
+              <div><label class="ifl">Referrer Last Name</label><input class="ifi tf-ro" readonly tabindex="-1" :value="auth.user?.last_name" /></div>
+              <div><label class="ifl">Referrer First Name</label><input class="ifi tf-ro" readonly tabindex="-1" :value="auth.user?.first_name" /></div>
+              <div><label class="ifl">Referrer Middle Name</label><input class="ifi tf-ro" readonly tabindex="-1" :value="auth.user?.middle_name" /></div>
+            </div>
+
+            <div class="tf-sec">Referral Details</div>
+            <div class="tf-grid tf-two">
+              <div><label class="ifl">Service Requested</label><input class="ifi tf-ro" readonly tabindex="-1" value="Psychological Testing" /></div>
+              <div><label class="ifl">Referral Source</label><input class="ifi tf-ro" readonly tabindex="-1" :value="referralSourceFor(auth.user?.role).label" /></div>
+            </div>
+            <div class="tf-row">
+              <label class="ifl">Concern / Reason for Referral <span style="color:var(--red)">*</span> <span style="color:var(--fog);font-weight:400">(max 1000 characters)</span></label>
+              <textarea v-model="tmduForm.reason" class="ifta" style="min-height:90px" maxlength="1000" placeholder="Why is this student being referred for psychological testing?"></textarea>
+            </div>
+
+            <div style="background:var(--blue-lt);border:1px solid var(--blue);border-radius:var(--r-sm);padding:10px 12px;font-size:12px;color:var(--blue)">
+              This creates a new referral for <strong>{{ referral.student?.last_name }}, {{ referral.student?.first_name }}</strong> under the same case, and moves it to TMDU for psychological assessment. That referral becomes shared between GCU and TMDU.
+            </div>
+            <div v-if="tmduError" style="margin-top:12px;background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px">
+              {{ tmduError }}
+            </div>
+          </div>
+
+          <div style="padding:12px 22px;border-top:1px solid var(--cloud);background:var(--snow);display:flex;justify-content:flex-end;gap:8px">
+            <button class="ibtn ibtn-p" :disabled="submittingTmdu" @click="referToTmdu">
+              {{ submittingTmdu ? 'Referring...' : 'Refer to TMDU' }}
+            </button>
+            <button class="ibtn ibtn-o" @click="showTmduModal = false" :disabled="submittingTmdu">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Resolve Referral Confirmation Modal - replaces the browser's
+           native confirm() popup, which looked and behaved differently from
+           every other confirmation in the app. Once resolved, the referral
+           becomes view-only (see isResolved) - no further edits to the
+           Feedback Slip, Session Notes, Follow-up, Previous Interventions,
+           or Case Action sections. Warns here, before the point of no
+           return, about whichever of Feedback Slip / Session Notes /
+           Follow-ups is still empty - only the ones that actually apply. -->
+      <div v-if="showResolveReferralModal" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="!resolvingReferral && (showResolveReferralModal = false)">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:420px;overflow:hidden;box-shadow:var(--sh-lg)">
+          <div style="padding:20px 22px;border-bottom:1px solid var(--cloud)">
+            <div style="font-size:15px;font-weight:600;color:var(--ink)">Resolve Referral?</div>
+          </div>
+          <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+            <div style="font-size:13px;color:var(--slate);line-height:1.6">
+              This marks referral <strong>{{ referral.referral_code }}</strong> for <strong>{{ referral.student?.last_name }}, {{ referral.student?.first_name }} {{ referral.student?.middle_name }}</strong> as resolved. Once resolved, it becomes view-only - no further changes can be made to it.
+            </div>
+            <div v-if="resolveWarnings.length" style="display:flex;flex-direction:column;gap:6px">
+              <div v-for="(w, i) in resolveWarnings" :key="i" style="padding:8px 12px;background:var(--cloud);border-radius:var(--r-sm);font-size:12px;color:var(--stone)">
+                ⚠ {{ w }}
+              </div>
+            </div>
+              <div style="display:flex;gap:8px">
+              <button class="ibtn ibtn-p" style="flex:1;justify-content:center" :disabled="resolvingReferral" @click="resolveReferral">
+                {{ resolvingReferral ? 'Resolving...' : 'Yes' }}
+              </button>
+              <button class="ibtn ibtn-o" style="flex:1;justify-content:center" :disabled="resolvingReferral" @click="showResolveReferralModal = false">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- No-Show Modal - GCU's own call on Call Slip vs. just marking it,
+           same as appointments/Index.vue, not an automatic threshold. -->
+      <div v-if="showCaseNoShowModal" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showCaseNoShowModal = false">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:440px;overflow:hidden;box-shadow:var(--sh-lg)">
+          <div style="padding:20px 22px;border-bottom:1px solid var(--cloud)">
+            <div style="font-size:15px;font-weight:600;color:var(--ink)">Mark as No-Show</div>
+          </div>
+          <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+            <div style="font-size:13px;color:var(--slate);line-height:1.6">
+              Marking this appointment as a no-show.
+              <span v-if="referral.case?.no_show_count">This case has {{ referral.case.no_show_count }} prior no-show{{ referral.case.no_show_count > 1 ? 's' : '' }}.</span>
+              Choose how to handle it:
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <button class="ibtn" style="justify-content:center;background:var(--amber-lt);color:var(--amber);border:1.5px solid var(--amber)" @click="submitCaseNoShow('reschedule')">Mark & Ask Student to Reschedule</button>
+              <button class="ibtn" style="justify-content:center;background:var(--red-lt);color:var(--red);border:1.5px solid #f0a8a8" v-if="!caseNoShowTarget?.no_show_escalated" @click="requestCallSlip(caseNoShowTarget)">Issue Call Slip (Escalate to College Dean)</button>
+              <button class="ibtn ibtn-o" style="justify-content:center" @click="showCaseNoShowModal = false">Never Mind</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Appointment Details Modal - opened by clicking an appointment card
+           in the SIF's Appointments list above (openApptDetail). Lets staff
+           confirm / mark attended / no-show / cancel right from the SIF,
+           same actions as appointments/Index.vue's detail modal, so they
+           have a choice instead of always needing to go to the Appointments
+           sidebar/page. -->
+      <div v-if="apptDetailTarget" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="apptDetailTarget = null">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:440px;overflow:hidden;box-shadow:var(--sh-lg)">
+          <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <div style="font-size:15px;font-weight:600;color:var(--ink)">Appointment Details</div>
+              <div style="font-size:11px;color:var(--fog);font-family:var(--mono)">{{ apptDetailTarget.appointment_code }}</div>
+            </div>
+            <button class="ibtn ibtn-g ibtn-sm" @click="apptDetailTarget = null">✕</button>
+          </div>
+          <div style="padding:22px;display:flex;flex-direction:column;gap:12px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Type</div>
+                <div style="font-size:13px;color:var(--ink)">{{ toTitleCase(apptDetailTarget.appointment_type) }}</div>
+              </div>
+              <div>
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Status</div>
+                <span class="ibadge" :class="isApptExpired(apptDetailTarget) ? 'ibadge-expired' : 'ibadge-' + apptDetailTarget.status">{{ isApptExpired(apptDetailTarget) ? 'Expired' : toTitleCase(apptDetailTarget.status) }}</span>
+              </div>
+              <div>
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Date</div>
+                <!-- Blank, not the placeholder row's date, until the
+                     student actually picks one (see the card-list comment
+                     above for why the DB row has a date already). -->
+                <div v-if="apptDetailTarget.request_status === 'awaiting_student'" style="font-size:13px;color:var(--stone)">Not set yet</div>
+                <div v-else style="font-size:13px;color:var(--ink)">{{ formatDate(apptDetailTarget.appointment_date) }}</div>
+              </div>
+              <div>
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Time</div>
+                <div v-if="apptDetailTarget.request_status === 'awaiting_student'" style="font-size:13px;color:var(--stone)">Not set yet</div>
+                <div v-else style="font-size:13px;color:var(--ink)">{{ formatTime12(apptDetailTarget.start_time) }} - {{ formatTime12(apptDetailTarget.end_time) }}</div>
+              </div>
+              <div>
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Unit</div>
+                <span class="ibadge" :class="'unit-' + apptDetailTarget.unit?.toLowerCase()">{{ apptDetailTarget.unit }}</span>
+              </div>
+              <div>
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Staff</div>
+                <div style="font-size:13px;color:var(--ink)">{{ apptDetailTarget.staff?.name || 'TBA' }}</div>
+              </div>
+            </div>
+            <div v-if="apptDetailTarget.location">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Location</div>
+              <div style="font-size:13px;color:var(--ink)">{{ apptDetailTarget.location }}</div>
+            </div>
+            <div v-if="apptDetailTarget.required_documents">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Required Documents</div>
+              <RequiredDocumentsDownload :documents="apptDetailTarget.required_documents" />
+            </div>
+            <div v-if="apptDetailTarget.notes">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Notes</div>
+              <div style="font-size:13px;color:var(--ink)">{{ apptDetailTarget.notes }}</div>
+            </div>
+
+            <!-- Bug (10/25/2026): schedule a date/time directly for the
+                 student right from here, instead of only being able to from
+                 the separate Appointments page - this is where "Waiting for
+                 Student to Pick a Schedule" is actually seen first. Same
+                 action as appointments/Index.vue's "Schedule Now": the
+                 referral moves to "scheduled" and this becomes the
+                 student's real appointment. -->
+            <div v-if="isGCU && !isResolved && apptDetailTarget.request_status === 'awaiting_student' && !['cancelled','completed'].includes(apptDetailTarget.status)" style="border-top:1px solid var(--cloud);padding-top:14px;display:flex;flex-direction:column;gap:8px;background:var(--foam);margin:0 -22px;padding-left:22px;padding-right:22px;padding-bottom:14px">
+              <div style="font-size:12.5px;font-weight:600;color:var(--moss)">Schedule Now</div>
+              <div style="font-size:11.5px;color:var(--stone)">This student is still waiting to pick their own schedule. Set a date and time yourself instead, or leave this and let them use their scheduling link.</div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+                <input v-model="apptScheduleForm.appointment_date" type="date" class="ifi" style="flex:1;min-width:130px" :min="todayStr" />
+                <input v-model="apptScheduleForm.start_time" type="time" class="ifi" style="flex:1;min-width:100px" min="08:00" max="16:00" />
+                <input v-model="apptScheduleForm.end_time" type="time" class="ifi" style="flex:1;min-width:100px" min="08:00" max="16:00" />
+              </div>
+              <div v-if="apptScheduleBlockedMsg" style="font-size:11px;color:var(--red)">{{ apptScheduleBlockedMsg }}</div>
+              <button
+                class="ibtn ibtn-p ibtn-sm"
+                style="justify-content:center"
+                :disabled="!apptScheduleForm.appointment_date || !apptScheduleForm.start_time || !apptScheduleForm.end_time || apptScheduling || !!apptScheduleBlockedMsg"
+                @click="confirmApptSchedule"
+              >{{ apptScheduling ? 'Scheduling...' : 'Schedule Now' }}</button>
+            </div>
+
+            <!-- Cancel reason, shown only once "Cancel Appointment" is
+                 pressed below, instead of a separate modal on top of this
+                 one. -->
+            <div v-if="apptCancelling" style="border-top:1px solid var(--cloud);padding-top:14px;display:flex;flex-direction:column;gap:8px">
+              <label class="ifl">Reason for Cancellation <span style="color:var(--red)">*</span></label>
+              <textarea v-model="apptCancelReason" class="ifta" style="min-height:70px" placeholder="Why is this appointment being cancelled?" maxlength="1000"></textarea>
+              <div style="display:flex;gap:8px">
+                <button class="ibtn" style="flex:1;justify-content:center;background:var(--red-lt);color:var(--red);border:1.5px solid #f5c0c0" @click="confirmApptCancel">Yes, Cancel Appointment</button>
+                <button class="ibtn ibtn-o" style="flex:1;justify-content:center" @click="apptCancelling = false">Never Mind</button>
+              </div>
+            </div>
+
+            <!-- Confirmation step for "Confirm Appointment" - asks before
+                 acting instead of just firing the request and relying on
+                 the toast afterward. -->
+            <div v-else-if="apptConfirming" style="border-top:1px solid var(--cloud);padding-top:14px;display:flex;flex-direction:column;gap:8px">
+              <div style="font-size:13px;color:var(--slate);line-height:1.6">
+                Confirm this appointment for {{ formatDate(apptDetailTarget.appointment_date) }}, {{ formatTime12(apptDetailTarget.start_time) }}-{{ formatTime12(apptDetailTarget.end_time) }}?
+              </div>
+              <div>
+                <label class="ifl">Assign Personnel</label>
+                <select v-model="apptConfirmStaffId" class="ifse">
+                  <option value="">Keep current ({{ apptDetailTarget.staff?.name || 'not assigned' }})</option>
+                  <option v-for="u in staffList" :key="u.id" :value="u.id">{{ u.name }}</option>
+                </select>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="ibtn ibtn-p" style="flex:1;justify-content:center" @click="confirmApptFromDetail">Yes, Confirm Appointment</button>
+                <button class="ibtn ibtn-o" style="flex:1;justify-content:center" @click="apptConfirming = false">Never Mind</button>
+              </div>
+            </div>
+
+            <!-- Reason step for "Reschedule Appointment" - same pattern as
+                 Cancel above, asks for a reason before actually sending a
+                 new scheduling link to the student. -->
+            <div v-else-if="apptRescheduling" style="border-top:1px solid var(--cloud);padding-top:14px;display:flex;flex-direction:column;gap:8px">
+              <label class="ifl">Reason for Rescheduling <span style="color:var(--red)">*</span></label>
+              <textarea v-model="apptRescheduleReason" class="ifta" style="min-height:70px" placeholder="Why does this need to be rescheduled?" maxlength="1000"></textarea>
+              <div style="display:flex;gap:8px">
+                <button class="ibtn" style="flex:1;justify-content:center;background:var(--blue-lt);color:var(--blue);border:1.5px solid var(--blue)" @click="confirmApptReschedule">Yes, Request Reschedule</button>
+                <button class="ibtn ibtn-o" style="flex:1;justify-content:center" @click="apptRescheduling = false">Never Mind</button>
+              </div>
+            </div>
+
+            <div v-else-if="isGCU && !isResolved && !['cancelled','completed'].includes(apptDetailTarget.status)" style="display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--cloud);padding-top:14px;margin-top:4px">
+              <!-- Confirm/Reschedule/Send Call-Slip are always shown so
+                   staff can see their choices, but stay disabled (greyed
+                   out) while request_status is still 'awaiting_student' -
+                   there's no date yet to confirm or reschedule, and nothing
+                   to escalate as a no-show. -->
+              <button
+                v-if="apptDetailTarget.status === 'pending'"
+                class="ibtn ibtn-p ibtn-sm"
+                :disabled="apptDetailTarget.request_status === 'awaiting_student'"
+                :title="apptDetailTarget.request_status === 'awaiting_student' ? 'Waiting for the student to pick a date/time first' : ''"
+                @click="apptConfirming = true; apptConfirmStaffId = ''"
+              >Confirm Appointment</button>
+              <button
+                v-if="['pending','confirmed'].includes(apptDetailTarget.status)"
+                class="ibtn ibtn-sm"
+                style="background:var(--blue-lt);color:var(--blue);border:1.5px solid var(--blue)"
+                :disabled="apptDetailTarget.request_status === 'awaiting_student'"
+                :title="apptDetailTarget.request_status === 'awaiting_student' ? 'Waiting for the student to pick a date/time first' : ''"
+                @click="apptRescheduling = true; apptRescheduleReason = ''"
+              >Reschedule Appointment</button>
+              <button
+                class="ibtn ibtn-sm"
+                style="background:var(--red-lt);color:var(--red);border:1.5px solid #f0a8a8"
+                :disabled="apptDetailTarget.no_show_escalated || sendingCallSlip"
+                :title="apptDetailTarget.no_show_escalated ? 'A Call-Slip was already sent for this appointment' : (apptDetailTarget.request_status === 'awaiting_student' ? 'The student has not picked a schedule yet - ask the Dean\'s Secretary to follow up' : '')"
+                @click="requestCallSlip(apptDetailTarget)"
+              >{{ apptDetailTarget.no_show_escalated ? 'Call-Slip Sent' : (apptDetailTarget.request_status === 'awaiting_student' ? 'Send for Call Slip' : 'Send Call-Slip') }}</button>
+              <button v-if="apptDetailTarget.status === 'confirmed'" class="ibtn ibtn-o ibtn-sm" @click="checkInApptFromDetail">Student Attended</button>
+              <button v-if="apptDetailTarget.status === 'confirmed'" class="ibtn ibtn-sm" style="background:var(--amber-lt);color:var(--amber);border:1.5px solid var(--amber)" @click="openCaseNoShowModal(apptDetailTarget); apptDetailTarget = null">No-Show</button>
+              <button class="ibtn ibtn-sm" style="background:var(--red-lt);color:var(--red);border:1.5px solid #f5c0c0" @click="apptCancelling = true; apptCancelReason = ''">Cancel Appointment</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Call Slip confirmation - a Call Slip can only be sent once per
+           appointment, so it always asks first. -->
+      <div v-if="callSlipTarget" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:80;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="callSlipTarget = null">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:420px;overflow:hidden;box-shadow:var(--sh-lg)">
+          <div style="padding:20px 22px;border-bottom:1px solid var(--cloud)">
+            <div style="font-size:15px;font-weight:600;color:var(--ink)">Send Call-Slip?</div>
+          </div>
+          <div style="padding:22px;display:flex;flex-direction:column;gap:16px">
+            <div style="font-size:13px;color:var(--slate);line-height:1.6">
+              <template v-if="callSlipTarget.request_status === 'awaiting_student'">The student has not picked a schedule yet. This will send a Call-Slip to the College Dean so they can follow up with the student. A Call-Slip can only be sent <strong>once</strong> and cannot be undone. Continue?</template>
+              <template v-else>This will escalate the appointment to the College Dean. A Call-Slip can only be sent <strong>once</strong> and cannot be undone. Continue?</template>
+            </div>
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+              <button class="ibtn ibtn-p" :disabled="sendingCallSlip" @click="confirmCallSlip">{{ sendingCallSlip ? 'Sending...' : 'Yes' }}</button>
+              <button class="ibtn ibtn-o" :disabled="sendingCallSlip" @click="callSlipTarget = null">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Parent Conference Details / Notes floating modal - same behaviour
+           as the Follow-up Session modal: notes are written once, then
+           read-only. -->
+      <div v-if="selectedParentConference" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="closeParentConferenceDetail">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:480px;overflow:hidden;box-shadow:var(--sh-lg)">
+          <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <div style="font-size:15px;font-weight:600;color:var(--ink)">Parent Conference</div>
+              <div style="font-size:12px;color:var(--stone)">{{ formatDate(selectedParentConference.conference_date) }} · {{ formatTime12(selectedParentConference.conference_time) }}</div>
+            </div>
+            <button class="ibtn ibtn-g ibtn-sm" @click="closeParentConferenceDetail">✕</button>
+          </div>
+          <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Issued By</div>
+                <div style="font-size:13px;color:var(--ink)">{{ selectedParentConference.issued_by?.name || '-' }}</div>
+              </div>
+              <div>
+                <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Reason</div>
+                <div style="font-size:13px;color:var(--ink)">{{ selectedParentConference.reason }}</div>
+              </div>
+            </div>
+            <div v-if="selectedParentConference.remarks">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Remarks</div>
+              <div style="font-size:13px;color:var(--slate)">{{ selectedParentConference.remarks }}</div>
+            </div>
+            <div v-if="parentConferenceNotesEditable">
+              <label class="ifl">Notes</label>
+              <textarea v-model="parentConferenceNotesForm" class="ifta" style="min-height:90px" maxlength="3000" placeholder="Add notes for this parent conference. Notes cannot be edited once saved."></textarea>
+            </div>
+            <div v-else>
+              <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:4px">Notes</div>
+              <div v-if="selectedParentConference.notes" style="font-size:13px;color:var(--slate);line-height:1.6;background:var(--snow);padding:10px 12px;border-radius:var(--r-sm);border-left:2px solid var(--silver)">{{ selectedParentConference.notes }}</div>
+              <div v-else style="font-size:13px;color:var(--stone)">No notes recorded.</div>
+              <div v-if="selectedParentConference.notes_recorded_by" style="font-size:11px;color:var(--fog);margin-top:6px">Recorded by {{ selectedParentConference.notes_recorded_by?.name }}</div>
+            </div>
+            <div v-if="parentConferenceNotesEditable" style="display:flex;gap:8px">
+              <button class="ibtn ibtn-p" :disabled="!parentConferenceNotesForm.trim() || savingParentConferenceNotes" @click="saveParentConferenceNotes">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                {{ savingParentConferenceNotes ? 'Saving...' : 'Save Notes' }}
+              </button>
+              <button class="ibtn ibtn-o" @click="closeParentConferenceDetail">Cancel</button>
+            </div>
+            <div v-else style="display:flex;gap:8px;align-items:center">
+              <button class="ibtn ibtn-o" @click="closeParentConferenceDetail">Close</button>
+              <span v-if="selectedParentConference.notes" style="font-size:11px;color:var(--fog)">Saved notes can no longer be edited.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Issue Parent Conference Slip Modal - just a record of issuance;
+           the slip itself is handed to the parent/guardian face-to-face. -->
+      <div v-if="showParentConferenceModal" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showParentConferenceModal = false">
+        <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:440px;overflow:hidden;box-shadow:var(--sh-lg)">
+          <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between">
+            <div style="font-size:15px;font-weight:600;color:var(--ink)">Issue Parent Conference Slip</div>
+            <button class="ibtn ibtn-g ibtn-sm" @click="showParentConferenceModal = false">✕</button>
+          </div>
+          <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+            <div style="font-size:12px;color:var(--stone);line-height:1.5">
+              This records that a slip was issued. Print/hand it to the parent or guardian in person.
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <label class="ifl">Date <span style="color:var(--red)">*</span></label>
+                <input v-model="parentConferenceForm.conference_date" type="date" class="ifi" style="width:100%" />
+              </div>
+              <div>
+                <label class="ifl">Time <span style="color:var(--red)">*</span></label>
+                <input v-model="parentConferenceForm.conference_time" type="time" class="ifi" style="width:100%" />
+              </div>
+            </div>
+            <div>
+              <label class="ifl">Reason <span style="color:var(--red)">*</span></label>
+              <input v-model="parentConferenceForm.reason" type="text" class="ifi" style="width:100%" placeholder="e.g. Repeated no-show, behavioral concern..." @input="parentConferenceForm.reason = plainText(parentConferenceForm.reason)" />
+            </div>
+            <div>
+              <label class="ifl">Remarks</label>
+              <textarea v-model="parentConferenceForm.remarks" class="ifta" style="min-height:70px" placeholder="Optional notes..." maxlength="1000" @input="parentConferenceForm.remarks = plainText(parentConferenceForm.remarks)"></textarea>
+            </div>
+            <div v-if="parentConferenceError" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px">{{ parentConferenceError }}</div>
+            <div v-if="parentConferenceConfirming" style="border-top:1px solid var(--cloud);padding-top:14px;display:flex;flex-direction:column;gap:10px">
+              <div style="font-size:13px;color:var(--slate);line-height:1.6">
+                Issue this Parent Conference Slip for <strong>{{ parentConferenceForm.conference_date }}</strong> at <strong>{{ formatTime12(parentConferenceForm.conference_time) }}</strong>? The student will be notified.
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="ibtn ibtn-p" style="flex:1;justify-content:center" @click="submitParentConferenceSlip" :disabled="savingParentConference">
+                  {{ savingParentConference ? 'Issuing...' : 'Yes, Issue Slip' }}
+                </button>
+                <button class="ibtn ibtn-o" style="flex:1;justify-content:center" @click="parentConferenceConfirming = false" :disabled="savingParentConference">Go Back</button>
+              </div>
+            </div>
+            <div v-else style="display:flex;gap:8px">
+              <button class="ibtn ibtn-p" @click="confirmParentConferenceSlip">Issue Slip</button>
+              <button class="ibtn ibtn-o" @click="showParentConferenceModal = false">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </template>
+
+    <!-- Read-only Case Referral (Refer to TMDU) form -->
+    <div v-if="slipModal" class="modal-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px" @click.self="slipModal = false">
+      <div style="background:#fff;border-radius:12px;max-width:820px;width:100%;max-height:92vh;overflow:auto;padding:20px">
+        <div v-if="slipLoading" style="padding:30px;text-align:center;color:var(--stone)">Loading...</div>
+        <CaseReferralView v-else-if="tmduSlip" :data="tmduSlip" />
+        <div v-else style="padding:30px;text-align:center;color:var(--stone)">Case referral form not available.</div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+          <button v-if="tmduSlip" class="ibtn ibtn-p" @click="router.push({ name: 'case-referral-show', params: { id: tmduSlip.id }, query: { return_to: route.fullPath } })">View Case Referral</button>
+          <button class="ibtn ibtn-o" @click="slipModal = false">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { saveBlob } from '../../utils/download';
+import { ref, onMounted, inject, computed, watch } from 'vue';
+import { useBlockedDates, officeHoursMessage } from '../../utils/blockedDates';
+import { useRoute, useRouter } from 'vue-router';
+import axios from 'axios';
+import api, { referralAPI, sessionNoteAPI, caseAPI, appointmentAPI, userAPI, caseReferralAPI, studentAPI } from '../../api/index';
+import CaseReferralView from '../../components/CaseReferralView.vue';
+import AdmissionSlipPaper from '../../components/AdmissionSlipPaper.vue';
+import FeedbackSlipPaper from '../../components/FeedbackSlipPaper.vue';
+import RequiredDocumentsDownload from '../../components/RequiredDocumentsDownload.vue';
+import { useDiscardGuard } from '../../utils/discardGuard';
+import { useAuthStore } from '../../stores/auth';
+import { toTitleCase, plainText, referralSourceFor, formatTime12, safeSearchInput } from '../../utils/validators';
+
+const route   = useRoute();
+const router  = useRouter();
+const toast   = inject('toast');
+const confirmAction = inject('confirmAction', null);
+const auth    = useAuthStore();
+const loading = ref(true);
+const acknowledging = ref(false);
+const referral = ref({});
+
+const sessionNotes      = ref([]);
+const showSessionModal  = ref(false);
+
+// Session Notes list is paged client-side, 3 at a time (newest first) -
+// same approach as cases/Show.vue, no separate paginated endpoint needed.
+const SESSION_NOTES_PER_PAGE = 3;
+const sessionNotesPage = ref(1);
+const sessionNotesTotalPages = computed(() =>
+  Math.max(1, Math.ceil(sessionNotes.value.length / SESSION_NOTES_PER_PAGE))
+);
+const pagedSessionNotes = computed(() => {
+  const start = (sessionNotesPage.value - 1) * SESSION_NOTES_PER_PAGE;
+  return sessionNotes.value.slice(start, start + SESSION_NOTES_PER_PAGE);
+});
+watch(sessionNotesTotalPages, (total) => {
+  if (sessionNotesPage.value > total) sessionNotesPage.value = total;
+});
+
+const followUps          = ref([]);
+const staffList          = ref([]);
+
+// Follow-up Session list, paged the same way - 3 at a time. followUps is
+// built oldest-first (each new one is pushed to the end, not unshifted),
+// so "go to the newest" after scheduling one means jumping to the last page.
+// Declared after followUps itself - watch() below reads the computed right
+// away to set its baseline, which would throw (followUps still in its
+// temporal dead zone) if this sat above the ref() line.
+const FOLLOW_UPS_PER_PAGE = 3;
+const followUpsPage = ref(1);
+const followUpsTotalPages = computed(() =>
+  Math.max(1, Math.ceil(followUps.value.length / FOLLOW_UPS_PER_PAGE))
+);
+const pagedFollowUps = computed(() => {
+  const start = (followUpsPage.value - 1) * FOLLOW_UPS_PER_PAGE;
+  return followUps.value.slice(start, start + FOLLOW_UPS_PER_PAGE);
+});
+watch(followUpsTotalPages, (total) => {
+  if (followUpsPage.value > total) followUpsPage.value = total;
+});
+const showFollowUpModal  = ref(false);
+const followUpError      = ref('');
+const schedulingFollowUp = ref(false);
+
+const selectedFollowUp  = ref(null);
+const followUpNotesForm = ref('');
+
+// Incident Report only - "Sanction/s Given" and "Detailed Report" reuse the
+// same case-intervention log as Session Notes, just typed differently and
+// without the excused/unexcused remarks.
+const sanctionForm = ref({ text: '' });
+const detailedReportForm = ref({ text: '' });
+
+// Bug (10/30/2026): Previous Interventions section removed from this page
+// (card, Intervention Detail Modal, interventionForm/selectedIntervention
+// state, viewIntervention(), addIntervention(), markInterventionCompleted(),
+// and the previousInterventionsForReferral computed) per request - it was
+// still showing under Student Information Files. interventionsForReferral
+// below stays: sanctionsForReferral/detailedReportsForReferral (Incident
+// Report) still filter from it.
+
+const interventionsForReferral = computed(() => {
+  const all = referral.value.case?.interventions || [];
+  return all.filter(i => i.referral_id === referral.value.id);
+});
+
+// A "Complaint" (Incident Report) is filed together with a disciplinary
+// referral by ComplaintController::store(). Once that referral has been
+// acknowledged, this page swaps its Referral-Info-style panels for the
+// Incident Report ones (see the Sanction/s Given and Detailed Report cards
+// below, and the Incident Report card replacing Referral Info).
+const isIncidentReport = computed(() => !!referral.value.complaint && !!referral.value.acknowledged_at);
+
+// Sanctions/detailed reports are SDU's domain, not GCU's - reuse the SDU
+// Head + admin gate rather than isGCU.
+const canManageIncidentReport = computed(() => isSDUHead.value || auth.user?.role === 'admin');
+
+const sanctionsForReferral = computed(() =>
+  interventionsForReferral.value.filter(i => i.type === 'sanction')
+);
+const detailedReportsForReferral = computed(() =>
+  interventionsForReferral.value.filter(i => i.type === 'detailed_report')
+);
+
+// Opens through the API (with the login token) so it works without the
+// storage symlink and respects who may see the file. PDFs and images
+// preview in a new tab; other files download. Mirrors ComplaintDetail.vue's
+// openAttachment(), which the SDU Complaints page uses for the same files.
+async function openAttachment(att) {
+  const previewable = /\.(pdf|jpe?g|png)$/i.test(att.original_filename || '');
+  const w = previewable ? window.open('', '_blank') : null; // opened first so the popup isn't blocked
+  try {
+    const res = await api.get(`/complaints/${referral.value.complaint.id}/attachments/${att.id}`, { responseType: 'blob' });
+    if (previewable && w) {
+      w.location = URL.createObjectURL(res.data);
+    } else {
+      saveBlob(res.data, att.original_filename || 'attachment');
+    }
+  } catch (e) {
+    w?.close();
+    toast?.error(e?.response?.status === 404
+      ? 'This file is no longer available. Ask the sender to upload it again.'
+      : 'Unable to open this file.');
+  }
+}
+
+// Parent conference slips belong to the ONE referral they were issued from.
+// (Older slips with no referral_id are attached to a referral by a migration.)
+const referralParentConferenceSlips = computed(() =>
+  (referral.value.case?.parent_conference_slips || [])
+    .filter(s => s.referral_id === referral.value.id)
+);
+
+const referralAppointments = computed(() => {
+  const all = referral.value.case?.appointments || [];
+  return all.filter(a => a.referral_id === referral.value.id);
+});
+
+// Case Action gate: Send Feedback Slip, Refer to TMDU, and Complete
+// Referral should all stay unavailable until an appointment for this case
+// has actually happened - "set" (any row exists) isn't enough, the student
+// has to have shown up. Checked case-wide (not just this referral's own
+// appointments), matching the backend check in CaseFile::hasAttendedAppointment()
+// / Referral::hasAttendedAppointment(). "Schedule Appointment" itself is
+// never gated by this - it has to stay clickable precisely so staff can set
+// the appointment that satisfies this gate.
+const hasAttendedAppointment = computed(() => {
+  // Linked by referral, not by case (B301); legacy rows with no referral_id
+  // on this case still count.
+  const all = referral.value.case?.appointments || [];
+  return all.some(a => a.status === 'completed' && (a.referral_id === referral.value.id || !a.referral_id));
+});
+
+// Broader than hasAttendedAppointment alone: nothing in the SIF should be
+// editable at all - not just Feedback Slip/Refer to TMDU/Resolve, but also
+// Previous Interventions, Session Notes, and Follow-up Session - until the
+// referral has actually been acknowledged AND an appointment for the case
+// has been attended. A referral still sitting at 'submitted' has no case
+// action yet (and "Schedule Appointment" itself stays hidden until
+// acknowledged - see the Case Action card below), so staff could otherwise
+// log session notes or follow-ups against a referral nobody has picked up.
+const canEditSif = computed(() => referral.value.status !== 'submitted' && hasAttendedAppointment.value);
+
+// Once a referral is resolved (status 'completed'), the whole SIF locks
+// down to view-only - Case Action, Feedback Slip, Session Notes, Follow-up
+// Session, and Previous Interventions all stop offering their edit/add
+// actions (see each section's isResolved checks). There is no "reopen"
+// path anymore now that Update Status has been removed.
+// Archived referrals are kept for the record only, so they lock the same way.
+const isResolved = computed(() => ['completed', 'closed'].includes(referral.value.status) || !!referral.value.is_archived);
+const lockedText = computed(() => referral.value.is_archived
+  ? 'This referral is archived. It is view-only.'
+  : 'This referral has been resolved. It is now view-only.');
+
+// Shown in the Resolve Referral confirmation modal - only for whichever of
+// these three is actually still empty at the moment of resolving, since
+// not every referral needs all three (e.g. a referral resolved with no
+// follow-up ever scheduled is normal, not an oversight to always flag).
+const resolveWarnings = computed(() => {
+  const warnings = [];
+  if (!referral.value.feedback_slips?.length) {
+    warnings.push('No feedback slip has been sent to the referrer yet.');
+  }
+  if (!followUps.value.length) {
+    warnings.push('No follow-up sessions have been scheduled yet.');
+  }
+  return warnings;
+});
+
+// Every handoff (Endorse to Unit, Refer to TMDU) is tagged with the
+// referral it was actually made from, so it should only ever show up in
+// that one referral's own Handoff/Endorsement History - never on every
+// referral under the same case.
+const caseHandoffs = computed(() => {
+  const all = referral.value.case?.handoffs || [];
+  return all.filter(h => h.referral_id === referral.value.id);
+});
+
+// "Refer to TMDU" creates a separate, sibling Referral (referral_type
+// psychological_testing) on this same case - see CaseController::referToTmdu().
+// This referral's own SIF stays GCU's; the actual psychological testing
+// workflow runs on the sibling referral's Testing Record. Once TMDU issues
+// the PAR (status test_results_issued), GCU should be able to see the
+// results here without having to go find that Testing Record themselves.
+//
+// Scoped per-referral via source_referral_id (the referral this escalation
+// was actually started FROM, set by referToTmdu()) - NOT just any sibling
+// psychological_testing referral under the case. One student has one case
+// for life, so a case commonly carries several unrelated referrals; without
+// this scope, referring ONE of them to TMDU made every other referral under
+// the same case immediately show "Already referred to TMDU" too, even
+// though staff never clicked the button from them. A record created before
+// source_referral_id existed won't match here and so won't show as
+// "already referred" on any referral - only new escalations are scoped.
+const tmduTestingRecord = computed(() => {
+  const sibling = (referral.value.case?.referrals || [])
+    .find(r => r.referral_type === 'psychological_testing'
+      && r.testing_record?.source_referral_id === referral.value.id);
+  return sibling?.testing_record || null;
+});
+
+const tmduSlip = ref(null);
+// True once this referral has been sent to TMDU (a Case Referral Slip exists).
+const referredToTmdu = computed(() => !!(tmduSlip.value || tmduTestingRecord.value));
+const slipModal = ref(false);
+const slipLoading = ref(false);
+async function loadSlip() {
+  if (!isGCU.value || !referral.value?.id) return;
+  // Only a real slip counts - an empty answer must not read as "already referred".
+  try { const slip = (await caseReferralAPI.forSource(referral.value.id)).data; tmduSlip.value = slip?.id ? slip : null; }
+  catch { tmduSlip.value = null; }
+}
+async function openSlipModal() {
+  slipModal.value = true;
+  slipLoading.value = true;
+  await loadSlip();
+  slipLoading.value = false;
+}
+watch(() => referral.value?.id, () => loadSlip());
+
+async function openPar(doc) {
+  try {
+    const res = await caseReferralAPI.downloadDocument(doc.id);
+    saveBlob(res.data, doc.original_filename || 'PAR');
+  } catch { toast?.error('Unable to download the PAR file.'); }
+}
+
+const parDocument = computed(() =>
+  (tmduTestingRecord.value?.documents || [])
+    .find(d => d.document_type === 'psychological_assessment_report') || null
+);
+
+// Admission Slip (QF-OSS-GCU-09) is its own card, Class Attendance
+// referrals only - the excused/unexcused determination used to live inside
+// Previous Interventions (via the now-removed interventionLocked /
+// showExcusedRemarks computeds below), conflating a narrative log with an
+// official slip that has its own document code.
+const isClassAttendance = computed(() => referral.value.referral_type === 'class_attendance');
+
+// The signed-in user referred this student (faculty, chair, dean...).
+const isReferrer = computed(() => !!auth.user?.id && referral.value.referred_by_user_id === auth.user.id);
+const feedbackRequested  = ref(false);
+const requestingFeedback = ref(false);
+async function requestFeedbackSlip() {
+  requestingFeedback.value = true;
+  try {
+    const res = await referralAPI.requestFeedback(referral.value.id);
+    feedbackRequested.value = true;
+    toast?.success(res.data?.message || 'Request sent to GCU.');
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Could not send the request.');
+    if (e.response?.status === 422) feedbackRequested.value = true;
+  } finally {
+    requestingFeedback.value = false;
+  }
+}
+
+// Once Admission Slip has been saved as Unexcused, lock further edits to it -
+// same "once set, no take-backs" behavior the old interventionLocked
+// computed gave, just checked on the referral's own admission_excused
+// column (set by ReferralController::saveAdmissionSlip()) instead of
+// digging through case interventions for an excused:false entry.
+const admission_excused_locked = computed(() =>
+  isClassAttendance.value && referral.value.admission_excused === false
+);
+
+const COUNSELING_ROLES = { GCU: ['admin', 'gcu_staff'], SDU: ['admin', 'sdu_head'], TMDU: ['admin', 'tmdu_staff', 'tmdu_head'] };
+
+const sessionForm = ref({
+  session_type: 'follow_up', observations: '', interventions: '',
+  next_steps: '', student_showed_up: true,
+});
+
+const FEEDBACK_CHECKLIST_ITEMS = [
+  { key: 'interview',            label: 'Interview' },
+  { key: 'counseling',           label: 'Counseling' },
+  { key: 'psychological_testing', label: 'Psychological Testing' },
+  { key: 'referred_scholarship', label: 'Referred to Scholarship Sponsor/s' },
+  { key: 'referred_other',       label: 'Referred to' },
+  { key: 'others',               label: 'Others' },
+];
+const feedbackForm = ref({
+  feedback_notes: '',
+  feedback_checklist: [],
+  feedback_referred_other_text: '',
+  feedback_others_text: '',
+  feedback_ctrl_no: '',
+});
+
+const showFeedbackForm = ref(false);
+
+const followUpForm = ref({
+  appointment_date: '', start_time: '', end_time: '', staff_user_id: '', notes: '',
+});
+
+const followUpAvailability = ref(null);
+const loadingFollowUpAvailability = ref(false);
+
+function isFollowUpOverlapping(slot) {
+  if (!followUpForm.value.start_time || !followUpForm.value.end_time) return false;
+  return slot.start_time < followUpForm.value.end_time && slot.end_time > followUpForm.value.start_time;
+}
+
+watch([() => followUpForm.value.staff_user_id, () => followUpForm.value.appointment_date], async ([staffId, date]) => {
+  followUpAvailability.value = null;
+  if (!staffId || !date) return;
+  loadingFollowUpAvailability.value = true;
+  try {
+    const res = await appointmentAPI.availability({ user_id: staffId, date });
+    followUpAvailability.value = res.data;
+  } catch (e) {
+    console.error(e);
+  } finally {
+    loadingFollowUpAvailability.value = false;
+  }
+});
+
+const isGCU = computed(() => ['admin', 'gcu_staff'].includes(auth.user?.role));
+const isSDUHead = computed(() => auth.user?.role === 'sdu_head');
+// TMDU testing referrals (and anything TMDU staff open) are the same OSS-wide
+// referral form as Refer a Student, so they share its document header
+// (QF-OSS-01) - only the layout/labels differ, not the header values.
+const useTmduDoc = computed(() =>
+  !!referral.value?.testing_record
+  || ['tmdu_staff', 'tmdu_head'].includes(auth.user?.role));
+// The Case Referral Slip (filled in through "Refer to TMDU") is TMDU's own
+// form - same layout as a general referral, but a different record entirely.
+const isCaseReferralSlip = computed(() => useTmduDoc.value);
+const headerDoc = computed(() => referralDoc.value || {});
+const isTMDUStaff = computed(() => ['tmdu_staff', 'tmdu_head'].includes(auth.user?.role));
+
+// Who can acknowledge THIS referral: GCU for ordinary referrals, TMDU staff
+// for the shared psychological_testing referral created by "Refer to TMDU".
+const canAcknowledge = computed(() =>
+  referral.value.testing_record ? isTMDUStaff.value : isGCU.value
+);
+
+// Set by whichever module linked here (?ctx=cases from Case Files). This page is
+// shared, so the flag decides whether it behaves as a live referral worksheet
+// (Referral Queue) or as a read-only entry in a case history (Case Files).
+const fromCases = computed(() => route.query.ctx === 'cases');
+
+// Case Files leads with the case number; every other entry point leads with the
+// referral code. Falls back gracefully while the record is still loading.
+const headerTitle = computed(() => {
+  if (fromCases.value && referral.value.case?.case_number) {
+    return referral.value.case.case_number;
+  }
+  return referral.value.referral_code || 'Referral Details';
+});
+
+const pipeline = [
+  { key: 'submitted',    label: 'Submitted' },
+  { key: 'acknowledged', label: 'Acknowledged' },
+  { key: 'scheduled',   label: 'Scheduled' },
+  { key: 'in_progress', label: 'In Progress' },
+  { key: 'completed',   label: 'Completed' },
+];
+
+const statusOrder = ['submitted', 'acknowledged', 'scheduled', 'in_progress', 'completed', 'closed'];
+
+function isStepDone(key) {
+  const current = statusOrder.indexOf(referral.value.status);
+  const step    = statusOrder.indexOf(key);
+  return step < current;
+}
+
+function isCurrentStep(key) {
+  return referral.value.status === key;
+}
+
+function goToStudentInformationFile() {
+  const studentId = referral.value.student?.id;
+  if (!studentId) return;
+  // TMDU works from the student's records, never from GCU's SIF.
+  if (isTMDUStaff.value) {
+    router.push({ name: 'student-show', params: { id: studentId } });
+    return;
+  }
+  router.push({ name: 'student-show', params: { id: studentId }, query: { ctx: 'cases' } });
+}
+
+async function acknowledge() {
+  acknowledging.value = true;
+  try {
+    const res = await referralAPI.acknowledge(referral.value.id);
+    referral.value = { ...referral.value, ...res.data.referral };
+    toast?.success('Acknowledged referral.');
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to acknowledge referral.');
+  } finally {
+    acknowledging.value = false;
+  }
+}
+
+function formatDate(date) {
+  return date ? new Date(date).toLocaleDateString() : '-';
+}
+
+function formatDateTime(date) {
+  if (!date) return '-';
+  const d = new Date(date);
+  return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+}
+
+function initials(first, last) {
+  return ((first?.[0] || '') + (last?.[0] || '')).toUpperCase() || '?';
+}
+
+// Student Profile Modal - opens in place of navigating away to the
+// Student Profile page (B-: "Profile" button used to redirect out of the
+// SIF). Family/Siblings/Education collapse behind a dropdown toggle, same
+// pattern as Related Concerns Comparison on the Student Profile page.
+const showProfileModal = ref(false);
+const expandedProfileGroups = ref({});
+function toggleProfileGroup(key) {
+  expandedProfileGroups.value = {
+    ...expandedProfileGroups.value,
+    [key]: !expandedProfileGroups.value[key],
+  };
+}
+
+// siblings is stored as JSON on the backend; axios/the API may hand it back
+// already parsed (array) or as a raw string depending on the DB driver, so
+// handle both rather than assuming one shape.
+const profileSiblings = computed(() => {
+  const raw = referral.value.student?.siblings;
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+});
+
+// Builds "Last, First Middle" the same way the existing Guardian block
+// does, returning '-' when none of the name parts are filled in.
+function fullName(last, first, middle) {
+  if (![last, first, middle].filter(Boolean).length) return '-';
+  return `${last || ''}, ${first || ''} ${middle || ''}`.trim();
+}
+
+const profileDetailGroups = computed(() => {
+  const s = referral.value.student || {};
+  const familyCount = [s.father_last_name, s.mother_last_name].filter(Boolean).length;
+  const educationCount = [
+    s.elementary_school, s.elementary_achievements,
+    s.high_school, s.high_school_achievements,
+    s.senior_high_school, s.senior_high_achievements,
+    s.college_school,
+  ].filter(Boolean).length;
+  return [
+    { key: 'family', label: 'Family Information', count: familyCount },
+    { key: 'siblings', label: 'Siblings Information', count: profileSiblings.value.length },
+    { key: 'education', label: 'Educational Attainment', count: educationCount },
+  ];
+});
+
+// Document Code Headers - read only here. Revision No. / Effectivity / Ctrl
+// No. for both the Referral Slip (QF-OSS-01) and the Feedback Slip
+// (QF-OSS-03) are edited in Management by admin, not on individual referrals.
+const referralDoc = ref({});
+const feedbackDoc = ref({});
+// Admission Slip (QF-OSS-GCU-09) - Class Attendance referrals only.
+const admissionDoc = ref({});
+const API_BASE = `${import.meta.env.VITE_API_URL || ''}/api`;
+function authHeaders() {
+  return { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+}
+async function fetchDocSettings(code, target) {
+  try {
+    // The header that was in force when this referral was made (older documents keep their header).
+    const at = referral.value?.created_at ? `?at=${encodeURIComponent(referral.value.created_at)}` : '';
+    const res = await axios.get(`${API_BASE}/document-settings/${code}${at}`, authHeaders());
+    target.value = res.data;
+  } catch (e) {
+    console.error(e);
+  }
+}
+function formatDocDate(date) {
+  if (!date) return '-';
+  return new Date(date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
+}
+
+async function logSession() {
+  // Interventions only make sense if the student was actually there - a
+  // no-show session has nothing to apply them to.
+  if (sessionForm.value.student_showed_up && !sessionForm.value.interventions) {
+    toast?.error('Please fill in the interventions applied.');
+    return;
+  }
+  try {
+    const now = new Date();
+    const interventions = sessionForm.value.student_showed_up ? sessionForm.value.interventions : '';
+    const payload = {
+      ...sessionForm.value,
+      interventions,
+      observations: interventions || 'Student did not attend.',
+      session_date: now.toISOString().split('T')[0],
+      session_start_time: now.toTimeString().slice(0, 5),
+    };
+    const res = await sessionNoteAPI.storeByReferral(referral.value.id, payload);
+    sessionNotes.value.unshift(res.data);
+    sessionNotesPage.value = 1;
+    // Mirrors ReferralController/SessionNoteController::storeByReferral()'s
+    // server-side bump to "In Progress" - only move the badge forward here
+    // too, so it doesn't visually override a status that's already moved on
+    // (referred out, completed, closed) until the next full reload.
+    if (['submitted', 'acknowledged', 'scheduled'].includes(referral.value.status)) {
+      referral.value.status = 'in_progress';
+    }
+    showSessionModal.value = false;
+    toast?.success('Session notes saved successfully.');
+    sessionForm.value = {
+      session_type: 'follow_up', observations: '', interventions: '',
+      next_steps: '', student_showed_up: true,
+    };
+  } catch (e) {
+    toast?.error('Failed to save session notes.');
+  }
+}
+
+// B248: confirm before actually sending, since this notifies the referrer
+// and can't be un-sent.
+const showFeedbackConfirm = ref(false);
+const sendingFeedback     = ref(false);
+
+function openFeedbackConfirm() {
+  const picked = feedbackForm.value.feedback_checklist || [];
+  if (!picked.length) {
+    toast?.error('Select at least one Intervention/s or Assistance Provided before sending.');
+    return;
+  }
+  if (picked.includes('referred_other') && !(feedbackForm.value.feedback_referred_other_text || '').trim()) {
+    toast?.error('Please specify the referral under Intervention/s or Assistance Provided.');
+    return;
+  }
+  if (picked.includes('others') && !(feedbackForm.value.feedback_others_text || '').trim()) {
+    toast?.error('Please specify the other intervention or assistance provided.');
+    return;
+  }
+  if (!feedbackForm.value.feedback_notes) {
+    toast?.error('Please write a feedback summary before sending.');
+    return;
+  }
+  showFeedbackConfirm.value = true;
+}
+
+async function sendFeedback() {
+  sendingFeedback.value = true;
+  try {
+    await referralAPI.sendFeedback(referral.value.id, feedbackForm.value);
+    const fresh = await referralAPI.show(referral.value.id);
+    referral.value = fresh.data;
+    feedbackForm.value = {
+      feedback_notes: '',
+      feedback_checklist: [],
+      feedback_referred_other_text: '',
+      feedback_others_text: '',
+      feedback_ctrl_no: '',
+    };
+    showFeedbackConfirm.value = false;
+    showFeedbackForm.value = false; // <--- ADD THIS LINE
+    toast?.success('Feedback sent to referrer.');
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to send feedback.');
+  } finally {
+    sendingFeedback.value = false;
+  }
+}
+
+// Admission Slip (QF-OSS-GCU-09) - Class Attendance referrals only. The
+// excused/unexcused checkboxes are modeled as a tri-state string ('1'/'0'/'')
+// rather than a plain boolean so "neither checked yet" is representable and
+// distinct from "explicitly Unexcused" - the backend only locks once it
+// actually receives false, not on an empty/undecided value.
+// The slip as the paper form has it (see components/AdmissionSlipPaper.vue).
+function slipFromReferral(r) {
+  const d = r.admission_details || {};
+  return {
+    admission_date:     r.admission_date ? String(r.admission_date).slice(0, 10) : '',
+    admission_time_in:  r.admission_time_in ? String(r.admission_time_in).slice(0, 5) : '',
+    admission_time_out: r.admission_time_out ? String(r.admission_time_out).slice(0, 5) : '',
+    excused:            r.admission_excused === true ? '1' : (r.admission_excused === false ? '0' : ''),
+    remarks:            r.admission_remarks || '',
+    days_count:         d.days_count || '',
+    causes:             Array.isArray(d.causes) ? [...d.causes] : [],
+    cause_activity:     d.cause_activity || '',
+    cause_others:       d.cause_others || '',
+    actions:            Array.isArray(d.actions) ? [...d.actions] : [],
+    action_others:      d.action_others || '',
+  };
+}
+const issuedAdmissionSlip = computed(() => slipFromReferral(referral.value));
+const admissionForm      = ref(slipFromReferral({}));
+const showAdmissionModal = ref(false);
+const savingAdmission    = ref(false);
+const admissionError     = ref('');
+
+function openAdmissionSlip() {
+  // A resolved / archived referral is view-only (the server refuses too).
+  if (isResolved.value || admission_excused_locked.value) return;
+  admissionForm.value = slipFromReferral(referral.value);
+  admissionError.value = '';
+  showAdmissionModal.value = true;
+}
+const closeAdmissionSlip = useDiscardGuard(showAdmissionModal, admissionForm, () => { showAdmissionModal.value = false; });
+
+async function saveAdmissionSlip() {
+  const f = admissionForm.value;
+  const problem =
+    !f.admission_date ? 'Enter the date absent or tardy.'
+    : (f.admission_time_in && f.admission_time_out && f.admission_time_out <= f.admission_time_in) ? 'The end time must be after the start time.'
+    : !f.causes.length ? 'Tick at least one cause of absence.'
+    : (f.causes.includes('official_activity') && !f.cause_activity.trim()) ? 'Name the official co/extra-curricular activity.'
+    : (f.causes.includes('others') && !f.cause_others.trim()) ? 'Write the other cause of absence.'
+    : !f.actions.length ? 'Tick at least one action taken.'
+    : (f.actions.includes('others') && !f.action_others.trim()) ? 'Write the other action taken.'
+    : f.excused === '' ? 'Mark the slip as Excused or Unexcused.'
+    : '';
+  if (problem) { admissionError.value = problem; return; }
+  admissionError.value = '';
+
+  const unexcused = f.excused === '0';
+  const sure = await confirmAction?.({
+    title: unexcused ? 'Save as Unexcused?' : 'Save Admission Slip?',
+    message: unexcused
+      ? 'The slip will be saved as Unexcused. After this it can no longer be changed.'
+      : 'The admission slip will be saved as Excused for this referral.',
+    confirmText: 'Yes, Save',
+    danger: unexcused,
+  });
+  if (confirmAction && !sure) return;
+
+  savingAdmission.value = true;
+  try {
+    const res = await referralAPI.saveAdmissionSlip(referral.value.id, {
+      admission_date:     f.admission_date,
+      admission_time_in:  f.admission_time_in || null,
+      admission_time_out: f.admission_time_out || null,
+      admission_excused:  f.excused === '1',
+      admission_remarks:  f.remarks.trim() || null,
+      admission_details: {
+        days_count:     f.days_count.trim() || null,
+        causes:         f.causes,
+        cause_activity: f.causes.includes('official_activity') ? f.cause_activity.trim() : null,
+        cause_others:   f.causes.includes('others') ? f.cause_others.trim() : null,
+        actions:        f.actions,
+        action_others:  f.actions.includes('others') ? f.action_others.trim() : null,
+      },
+    });
+    referral.value = { ...referral.value, ...res.data };
+    showAdmissionModal.value = false;
+    toast?.success('Admission slip saved.');
+  } catch (e) {
+    const errs = e.response?.data?.errors;
+    admissionError.value = (errs && Object.values(errs)[0]?.[0]) || e.response?.data?.message || 'Failed to save admission slip.';
+  } finally {
+    savingAdmission.value = false;
+  }
+}
+
+async function addSanction() {
+  if (!sanctionForm.value.text) {
+    toast?.error('Please describe the sanction given.');
+    return;
+  }
+  try {
+    const res = await caseAPI.addIntervention(referral.value.case.id, {
+      referral_id: referral.value.id,
+      type: 'sanction',
+      description: sanctionForm.value.text,
+    });
+    if (!referral.value.case.interventions) referral.value.case.interventions = [];
+    referral.value.case.interventions.unshift(res.data);
+    sanctionForm.value = { text: '' };
+    toast?.success('Sanction recorded.');
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to save sanction.');
+  }
+}
+
+async function addDetailedReport() {
+  if (!detailedReportForm.value.text) {
+    toast?.error('Please write the report entry.');
+    return;
+  }
+  try {
+    const res = await caseAPI.addIntervention(referral.value.case.id, {
+      referral_id: referral.value.id,
+      type: 'detailed_report',
+      description: detailedReportForm.value.text,
+    });
+    if (!referral.value.case.interventions) referral.value.case.interventions = [];
+    referral.value.case.interventions.unshift(res.data);
+    detailedReportForm.value = { text: '' };
+    toast?.success('Report entry saved.');
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to save report entry.');
+  }
+}
+
+// Resolve Referral - the only way a referral's status moves to 'completed'
+// now that Update Status has been removed entirely. Confirmation happens
+// via the in-app modal (showResolveReferralModal) instead of the browser's
+// native confirm() popup. Once resolved, isResolved locks the rest of the
+// page down to view-only - there is no "reopen" path anymore.
+const showResolveReferralModal = ref(false);
+
+// GCU Head: Override Status for this referral.
+const REF_OVERRIDE_OPTIONS = [
+  { value: 'submitted',    label: 'Submitted' },
+  { value: 'acknowledged', label: 'Acknowledged' },
+  { value: 'scheduled',    label: 'Scheduled' },
+  { value: 'in_progress',  label: 'In Progress' },
+  { value: 'completed',    label: 'Resolved' },
+  { value: 'closed',       label: 'Closed' },
+];
+const refOverride = ref({ open: false, status: '', reason: '', appointment_date: '', start_time: '', end_time: '', saving: false, error: '' });
+function openRefOverride() {
+  refOverride.value = { open: true, status: '', reason: '', appointment_date: '', start_time: '', end_time: '', saving: false, error: '' };
+}
+async function applyRefOverride() {
+  const o = refOverride.value;
+  o.saving = true; o.error = '';
+  try {
+    const payload = { status: o.status, reason: o.reason.trim() };
+    if (o.status === 'scheduled') {
+      payload.appointment_date = o.appointment_date;
+      payload.start_time = o.start_time;
+      payload.end_time = o.end_time;
+    }
+    const res = await referralAPI.overrideStatus(referral.value.id, payload);
+    referral.value.status = res.data.referral.status;
+    referral.value.acknowledged_at = res.data.referral.acknowledged_at;
+    o.open = false;
+    toast?.success('Referral status updated.');
+    if (o.status === 'scheduled') {
+      await refreshReferralAfterApptChange();
+    }
+  } catch (e) {
+    o.error = e.response?.data?.message || 'Could not change the status.';
+  } finally {
+    o.saving = false;
+  }
+}
+const resolvingReferral = ref(false);
+
+async function resolveReferral() {
+  resolvingReferral.value = true;
+  try {
+    const res = await referralAPI.updateStatus(referral.value.id, { status: 'completed' });
+    referral.value.status = res.data.status;
+    showResolveReferralModal.value = false;
+    toast?.success('Referral resolved.');
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to resolve referral.');
+  } finally {
+    resolvingReferral.value = false;
+  }
+}
+
+// B255: Refer to TMDU now requires an actual filled-out reason instead of
+// firing immediately with a hardcoded string.
+const showTmduModal  = ref(false);
+
+// Referrer edit: the person who submitted a referral can fix its details
+// until GCU acknowledges it.
+const canEditSubmittedReferral = computed(() => {
+  const u = auth.user;
+  const r = referral.value;
+  return !!u && !!r?.id
+    && r.referred_by_user_id === u.id
+    && r.status === 'submitted'
+    && !r.acknowledged_at
+    && !isResolved.value;
+});
+const isReferrerOfThis = computed(() => !!auth.user && referral.value?.referred_by_user_id === auth.user.id);
+
+const deletingReferral = ref(false);
+
+async function deleteReferral() {
+  const ok = await confirmAction?.({
+    title: 'Delete Referral?',
+    message: `Delete referral ${referral.value.referral_code}? This cannot be undone.`,
+    confirmText: 'Yes',
+    cancelText: 'Cancel',
+  });
+  if (confirmAction && !ok) return;
+
+  deletingReferral.value = true;
+  try {
+      await referralAPI.destroy(referral.value.id);
+      toast?.success('Referral deleted.');
+      const isGcu = ['admin', 'gcu_staff', 'tmdu_staff'].includes(auth.user?.role);
+      const target = fromCases.value ? 'cases' : (isGcu ? 'referrals' : 'sent-referrals');
+      router.push({ name: target });
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to delete referral.');
+  } finally {
+    deletingReferral.value = false;
+  }
+}
+
+
+// Once acknowledged, the referrer can no longer delete outright - they can
+// ask the owning unit to void it instead, but only up through 'scheduled'
+// (mirrors the backend's Referral::canRequestCancellation()). Once it
+// moves to 'in_progress', resolves, or branch-exits (Referred TMDU/
+// External), it's already being acted on, so this stops being offered.
+const canRequestVoid = computed(() => {
+  const r = referral.value;
+  return isReferrerOfThis.value && !!r?.acknowledged_at && !r?.void_requested_at && !r?.is_archived
+    && !['in_progress', 'referred_tmdu', 'referred_external', 'completed', 'closed', 'cancelled'].includes(r?.status);
+});
+const showVoidModal = ref(false);
+const voidReason = ref('');
+const voidError = ref('');
+const requestingVoid = ref(false);
+async function submitVoidRequest() {
+  if (voidReason.value.trim().length < 10) {
+    voidError.value = 'Please explain why in at least 10 characters.';
+    return;
+  }
+  requestingVoid.value = true;
+  voidError.value = '';
+  try {
+    const res = await referralAPI.requestVoid(referral.value.id, { reason: voidReason.value.trim() });
+    referral.value = { ...referral.value, ...res.data };
+    showVoidModal.value = false;
+    voidReason.value = '';
+    toast?.success('Cancellation request submitted.');
+  } catch (e) {
+    voidError.value = e.response?.data?.message || 'Failed to submit the request.';
+  } finally {
+    requestingVoid.value = false;
+  }
+}
+
+// Reviewing a pending request: TMDU reviews its own Case Referral Slips,
+// GCU/SDU review everything else - authorizeReferralWriter() on the backend
+// is what actually enforces this; this just decides whether to show the
+// buttons.
+const canReviewVoid = computed(() => {
+  const r = referral.value;
+  if (!r?.void_requested_at) return false;
+  return r.testing_record ? isTMDUStaff.value : (isGCU.value || isSDUHead.value);
+});
+
+const decidingVoid = ref(false);
+
+async function approveVoidRequest() {
+  const ok = await confirmAction?.({
+    title: 'Approve Cancellation?',
+    message: 'Approve this cancellation request? The referral will be archived.',
+    confirmText: 'Yes, Approve & Archive',
+  });
+  if (confirmAction && !ok) return;
+
+  decidingVoid.value = true;
+  try {
+    const res = await referralAPI.approveVoid(referral.value.id);
+    referral.value = { ...referral.value, ...res.data };
+    toast?.success('Cancellation approved - referral archived.');
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to approve the request.');
+  } finally {
+    decidingVoid.value = false;
+  }
+}
+async function denyVoidRequest() {
+  decidingVoid.value = true;
+  try {
+    const res = await referralAPI.denyVoid(referral.value.id);
+    referral.value = { ...referral.value, ...res.data };
+    toast?.success('Cancellation request denied.');
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to deny the request.');
+  } finally {
+    decidingVoid.value = false;
+  }
+}
+
+const showReferralEdit = ref(false);
+const showEditConfirm = ref(false);
+const savingReferralEdit = ref(false);
+const referralEditError = ref('');
+const referralEditForm = ref({ nature_of_concern: '', incident_description: '', incident_date: '' });
+const referralEditOriginal = ref({});
+
+const editChanges = computed(() => {
+  const changes = [];
+  const rf = referralEditForm.value;
+  const ro = referralEditOriginal.value;
+  
+  if (rf.nature_of_concern !== ro.nature_of_concern) {
+    changes.push({ label: 'Concern / Reason', before: ro.nature_of_concern || '-', after: rf.nature_of_concern || '-' });
+  }
+  if (rf.incident_date !== ro.incident_date) {
+    changes.push({ label: 'Incident Date', before: ro.incident_date || '-', after: rf.incident_date || '-' });
+  }
+  if (rf.incident_description !== ro.incident_description) {
+    changes.push({ label: 'Incident Description', before: ro.incident_description || '-', after: rf.incident_description || '-' });
+  }
+
+  const sf = studentEditForm.value;
+  const so = studentEditOriginal.value;
+  const studentLabels = {
+    first_name: 'First Name', last_name: 'Last Name', middle_name: 'Middle Name',
+    suffix: 'Suffix', sex: 'Sex', college: 'College', program: 'Program', year_level: 'Year Level'
+  };
+  for (const [key, label] of Object.entries(studentLabels)) {
+    if (String(sf[key] || '') !== String(so[key] || '')) {
+      changes.push({ label, before: so[key] || '-', after: sf[key] || '-' });
+    }
+  }
+  return changes;
+});
+
+// Student info section of Edit Referral - see updateReferredStudent() on the
+// backend. Only the fields a referrer is allowed to fix: no Student ID,
+// College, Section or contact/guardian info (Students module only).
+const studentEditForm = ref({ first_name: '', last_name: '', middle_name: '', suffix: '', sex: '', program: '', year_level: '' });
+const studentEditOriginal = ref({});
+const studentEditProgramsByCollege = ref({});
+const studentEditPrograms = computed(() => studentEditProgramsByCollege.value[referral.value.student?.college] || []);
+
+// "Referred the wrong student? Change Student" - see reassignStudent() in
+// the backend. Separate from studentEditForm above: that section edits the
+// CURRENT student's own fields, this re-points the referral at a different
+// student entirely and takes effect immediately (not on Save Changes),
+// since it moves the referral onto a different Student Information File.
+const showChangeStudent = ref(false);
+const changeStudentQuery = ref('');
+const changeStudentSuggestions = ref([]);
+const showChangeStudentDropdown = ref(false);
+const changeStudentError = ref('');
+const reassigningStudent = ref(false);
+const searchingStudents = ref(false);
+let changeStudentTimeout = null;
+
+function onChangeStudentSearch() {
+  changeStudentQuery.value = safeSearchInput(changeStudentQuery.value);
+  changeStudentError.value = '';
+  clearTimeout(changeStudentTimeout);
+  
+  const q = changeStudentQuery.value.trim();
+  if (q.length < 1) {
+    changeStudentSuggestions.value = [];
+    showChangeStudentDropdown.value = false;
+    return;
+  }
+  
+  changeStudentTimeout = setTimeout(async () => {
+    searchingStudents.value = true;
+    try {
+      const res = await studentAPI.index({ search: q, is_active: 1, scope: 'all' });
+      changeStudentSuggestions.value = (res.data.data || []).filter(s => s.id !== referral.value.student?.id);
+      showChangeStudentDropdown.value = changeStudentSuggestions.value.length > 0;
+    } catch (e) {
+      changeStudentSuggestions.value = [];
+    } finally {
+      searchingStudents.value = false;
+    }
+  }, 350);
+}
+
+async function pickChangeStudent(s) {
+  const ok = await confirmAction?.({
+    title: 'Change Student?',
+    message: `Change this referral to ${s.last_name}, ${s.first_name} (${s.student_id})? This moves it onto that student's own Student Information File.`,
+    confirmText: 'Yes, Change Student',
+  });
+  if (confirmAction && !ok) return;
+
+  reassigningStudent.value = true;
+  changeStudentError.value = '';
+  try {
+    await referralAPI.reassignStudent(referral.value.id, { student_id: s.id });
+    const fresh = await referralAPI.show(referral.value.id);
+    referral.value = fresh.data;
+    showChangeStudent.value = false;
+    changeStudentQuery.value = '';
+    changeStudentSuggestions.value = [];
+    showChangeStudentDropdown.value = false;
+    const ns = referral.value.student || {};
+    studentEditForm.value = {
+      first_name:  ns.first_name || '',
+      last_name:   ns.last_name || '',
+      middle_name: ns.middle_name || '',
+      suffix:      ns.suffix || '',
+      sex:         ns.sex || '',
+      program:     ns.program || '',
+      year_level:  ns.year_level ? String(ns.year_level) : '',
+    };
+    studentEditOriginal.value = { ...studentEditForm.value };
+    toast?.success('Referral moved to the selected student.');
+  } catch (e) {
+    changeStudentError.value = e.response?.data?.message || 'Failed to change the student. Please try again.';
+  } finally {
+    reassigningStudent.value = false;
+  }
+}
+
+async function loadStudentEditPrograms() {
+  if (Object.keys(studentEditProgramsByCollege.value).length) return;
+  try {
+    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
+    const [collegeRes, programRes] = await Promise.all([
+      axios.get(`${API_BASE}/management/colleges`, { headers }),
+      axios.get(`${API_BASE}/management/programs`, { headers }),
+    ]);
+    const collegeNameById = {};
+    (collegeRes.data || []).forEach(c => { collegeNameById[c.id] = c.name; });
+    const grouped = {};
+    (programRes.data || []).forEach(p => {
+      const collegeName = collegeNameById[p.college_id];
+      if (!collegeName) return;
+      (grouped[collegeName] ||= []).push(p.name);
+    });
+    studentEditProgramsByCollege.value = grouped;
+  } catch (e) { /* the Program field still works as a free text fallback via the current value */ }
+}
+
+function openReferralEdit() {
+  referralEditForm.value = {
+    nature_of_concern:    referral.value.nature_of_concern || '',
+    incident_description: referral.value.incident_description || '',
+    incident_date:        referral.value.incident_date ? String(referral.value.incident_date).slice(0, 10) : '',
+  };
+  referralEditOriginal.value = { ...referralEditForm.value };
+  showEditConfirm.value = false;
+  const s = referral.value.student || {};
+  studentEditForm.value = {
+    first_name:  s.first_name || '',
+    last_name:   s.last_name || '',
+    middle_name: s.middle_name || '',
+    suffix:      s.suffix || '',
+    sex:         s.sex || '',
+    college:     s.college || '',
+    program:     s.program || '',
+    year_level:  s.year_level ? String(s.year_level) : '',
+  };
+  studentEditOriginal.value = { ...studentEditForm.value };
+  referralEditError.value = '';
+  showChangeStudent.value = false;
+  changeStudentQuery.value = '';
+  changeStudentSuggestions.value = [];
+  showChangeStudentDropdown.value = false;
+  changeStudentError.value = '';
+  showReferralEdit.value = true;
+  loadStudentEditPrograms();
+}
+
+function saveReferralEdit() {
+  const f = referralEditForm.value;
+  if ((f.nature_of_concern || '').trim().length < 10) {
+    referralEditError.value = 'Please describe the concern in at least 10 characters.';
+    return;
+  }
+  if (!studentEditForm.value.first_name.trim() || !studentEditForm.value.last_name.trim()) {
+    referralEditError.value = "Please fill in the student's first and last name.";
+    return;
+  }
+  if (editChanges.value.length === 0) {
+    showReferralEdit.value = false; // Nothing changed
+    return;
+  }
+  showEditConfirm.value = true;
+}
+
+async function executeReferralEdit() {
+  showEditConfirm.value = false;
+  savingReferralEdit.value = true;
+  referralEditError.value = '';
+  const f = referralEditForm.value;
+  
+  try {
+    const payload = { nature_of_concern: f.nature_of_concern.trim() };
+    if (referral.value.referral_type === 'disciplinary') {
+      payload.incident_description = f.incident_description || null;
+      payload.incident_date = f.incident_date || null;
+    }
+    const res = await referralAPI.update(referral.value.id, payload);
+    referral.value = { ...referral.value, ...res.data };
+
+    const sf = studentEditForm.value;
+    const changedStudentFields = Object.keys(sf).filter(k => (sf[k] || '') !== (studentEditOriginal.value[k] || ''));
+    if (changedStudentFields.length) {
+      const studentPayload = {};
+      changedStudentFields.forEach(k => { studentPayload[k] = sf[k]; });
+      const sRes = await referralAPI.updateStudent(referral.value.id, studentPayload);
+      referral.value = { ...referral.value, student: { ...referral.value.student, ...sRes.data } };
+    }
+
+    showReferralEdit.value = false;
+    toast?.success('Referral updated.');
+  } catch (e) {
+    referralEditError.value = e.response?.data?.message || 'Could not update the referral.';
+  } finally {
+    savingReferralEdit.value = false;
+  }
+}
+const submittingTmdu = ref(false);
+const tmduError      = ref('');
+const tmduForm       = ref({ reason: '' });
+
+function openTmduModal() {
+  tmduForm.value = { reason: '' };
+  tmduError.value = '';
+  showTmduModal.value = true;
+}
+
+async function referToTmdu() {
+  if (!tmduForm.value.reason.trim()) {
+    tmduError.value = 'Please provide a reason for the referral.';
+    return;
+  }
+  const sure = await confirmAction?.({
+    title: 'Refer to TMDU?',
+    message: `This sends ${referral.value.student?.first_name || 'the student'} ${referral.value.student?.last_name || ''} to TMDU for psychological testing, as a new referral under the same case. TMDU will be notified.`,
+    confirmText: 'Yes, Refer to TMDU',
+  });
+  if (confirmAction && !sure) return;
+  submittingTmdu.value = true;
+  try {
+    // referral_id tells the backend which referral this escalation is
+    // actually being started FROM, so it can scope the Testing Record to
+    // just this referral (source_referral_id) instead of sharing one TMDU
+    // escalation across every referral under the case - see
+    // tmduTestingRecord above.
+    const res = await caseAPI.referToTmdu(referral.value.case.id, { reason: tmduForm.value.reason, referral_id: referral.value.id });
+    referral.value.case.current_unit     = 'TMDU';
+    referral.value.case.status           = 'awaiting_testing';
+    referral.value.case.referred_to_tmdu = true;
+    // The response returns the sibling referral and its testing record as
+    // separate top-level fields, not nested together - stitch them back
+    // together and merge the referral into this case's referrals list so
+    // tmduTestingRecord (and the "Already referred to TMDU" button state)
+    // updates immediately instead of only after a full page reload.
+    //
+    // referral_was_reused tells us whether the backend reused an existing
+    // open psychological_testing referral for this case instead of making a
+    // new one (clicking "Refer to TMDU" more than once used to fork off a
+    // duplicate referral every time) - replace that entry in place rather
+    // than appending, so the list doesn't end up with a client-side
+    // duplicate either.
+    const newReferral = res.data?.referral;
+    const newTestingRecord = res.data?.testing_record;
+    const wasReused = !!res.data?.referral_was_reused;
+    if (newReferral) {
+      const merged = { ...newReferral, testing_record: newTestingRecord || null };
+      const existingList = referral.value.case.referrals || [];
+      referral.value.case.referrals = wasReused
+        ? existingList.map(r => (r.id === newReferral.id ? merged : r))
+        : [...existingList, merged];
+    }
+    showTmduModal.value = false;
+    toast?.success(
+      !newReferral ? 'Case referred to TMDU.'
+      : wasReused ? `Updated the existing TMDU referral ${newReferral.referral_code}.`
+      : `Referred to TMDU. New referral ${newReferral.referral_code} created.`
+    );
+  } catch (e) {
+    tmduError.value = e.response?.data?.message || 'Failed to refer to TMDU.';
+  } finally {
+    submittingTmdu.value = false;
+  }
+}
+
+const showCaseNoShowModal = ref(false);
+const caseNoShowTarget = ref(null);
+
+function openCaseNoShowModal(a) {
+  caseNoShowTarget.value = a;
+  showCaseNoShowModal.value = true;
+}
+
+async function submitCaseNoShow(action) {
+  if (!caseNoShowTarget.value || action === 'call_slip') return;
+
+  const ok = await confirmAction?.({
+    title: 'Mark as No-Show?',
+    message: `Mark this appointment as a no-show and ask the student to reschedule?`,
+    confirmText: 'Yes, Mark No-Show',
+  });
+  if (confirmAction && !ok) return;
+
+  try {
+    const res = await appointmentAPI.escalateNoShow(caseNoShowTarget.value.id, action);
+    caseNoShowTarget.value.status = 'no_show';
+    toast?.success(res.data.message || 'Marked as no-show.');
+    showCaseNoShowModal.value = false;
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to mark as no-show.');
+  }
+}
+
+// Appointment Details modal - opened by clicking an appointment card in the
+// SIF's own Appointments list, so staff can act (confirm/check-in/no-show/
+// cancel) without leaving the SIF for the Appointments page.
+const apptDetailTarget = ref(null);
+const apptCancelling = ref(false);
+const apptCancelReason = ref('');
+const apptConfirming = ref(false);
+const apptConfirmStaffId = ref('');
+const apptRescheduling = ref(false);
+const apptRescheduleReason = ref('');
+// Bug (10/25/2026): staff could only schedule a date/time directly for a
+// student (instead of waiting on their own scheduling link) from the
+// separate Appointments page - not from here, where the referral's
+// appointment and its "Waiting for Student to Pick a Schedule" state is
+// actually seen first. Same backend action as appointments/Index.vue's
+// "Schedule Now" (appointmentAPI.scheduleForStudent) - the referral's
+// status moves to "scheduled" and this becomes the student's real
+// appointment, same as if they'd picked it themselves.
+const apptScheduleForm = ref({ appointment_date: '', start_time: '', end_time: '' });
+const apptScheduling = ref(false);
+
+// Bug (11/3/2026): staff had no visible signal that a student's own
+// scheduling link had already lapsed (vs. just "still waiting for
+// student") - same token_expires_at check as the student-side pages and
+// appointments/Index.vue. "Schedule Now" above still works past expiry -
+// this only changes what the badge/label say, not what staff can do.
+function isApptExpired(a) {
+  return a?.status === 'pending' && a?.request_status === 'awaiting_student' &&
+    !!a?.token_expires_at && new Date(a.token_expires_at) < new Date();
+}
+
+function openApptDetail(a) {
+  apptDetailTarget.value = a;
+  apptCancelling.value = false;
+  apptCancelReason.value = '';
+  apptConfirming.value = false;
+  apptRescheduling.value = false;
+  apptRescheduleReason.value = '';
+  apptScheduleForm.value = { appointment_date: '', start_time: '', end_time: '' };
+}
+
+// Re-fetches the whole referral (same pattern as sendFeedback above) so the
+// referral's status badge, the Appointments list, and anything gated on
+// hasAttendedAppointment/canEditSif all reflect what actually got persisted,
+// rather than guessing at a local merge.
+async function refreshReferralAfterApptChange() {
+  const fresh = await referralAPI.show(referral.value.id);
+  referral.value = fresh.data;
+}
+
+async function confirmApptFromDetail() {
+  if (!apptDetailTarget.value) return;
+  try {
+    await appointmentAPI.confirm(apptDetailTarget.value.id, apptConfirmStaffId.value ? { staff_user_id: apptConfirmStaffId.value } : {});
+    toast?.success('Appointment confirmed.');
+    apptDetailTarget.value = null;
+    apptConfirming.value = false;
+    await refreshReferralAfterApptChange();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to confirm appointment.');
+  }
+}
+
+async function checkInApptFromDetail() {
+  if (!apptDetailTarget.value) return;
+
+  const ok = await confirmAction?.({
+    title: 'Mark as Attended?',
+    message: `Mark ${apptDetailTarget.value.student?.last_name}, ${apptDetailTarget.value.student?.first_name}'s appointment as attended? This cannot be undone.`,
+    confirmText: 'Yes, Mark Attended',
+  });
+  if (confirmAction && !ok) return;
+
+  try {
+    await appointmentAPI.checkIn(apptDetailTarget.value.id);
+    toast?.success('Marked as attended.');
+    apptDetailTarget.value = null;
+    await refreshReferralAfterApptChange();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to mark as attended.');
+  }
+}
+
+async function confirmApptCancel() {
+  if (!apptDetailTarget.value) return;
+  if (!apptCancelReason.value.trim()) {
+    toast?.error('Please give a reason for cancelling.');
+    return;
+  }
+
+  const ok = await confirmAction?.({
+    title: 'Cancel Appointment?',
+    message: `Cancel this appointment? The student will be notified. This cannot be undone.`,
+    confirmText: 'Yes, Cancel',
+  });
+  if (confirmAction && !ok) return;
+
+  try {
+    await appointmentAPI.cancel(apptDetailTarget.value.id, { cancellation_reason: apptCancelReason.value });
+    toast?.success('Appointment cancelled.');
+    apptDetailTarget.value = null;
+    apptCancelling.value = false;
+    await refreshReferralAfterApptChange();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to cancel appointment.');
+  }
+}
+
+async function confirmApptReschedule() {
+  if (!apptDetailTarget.value) return;
+  if (!apptRescheduleReason.value.trim()) {
+    toast?.error('Please give a reason for rescheduling.');
+    return;
+  }
+  try {
+    await appointmentAPI.reschedule(apptDetailTarget.value.id, { reschedule_reason: apptRescheduleReason.value });
+    toast?.success('Reschedule request sent to student.');
+    apptDetailTarget.value = null;
+    apptRescheduling.value = false;
+    await refreshReferralAfterApptChange();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to request reschedule.');
+  }
+}
+
+async function confirmApptSchedule() {
+  if (!apptDetailTarget.value || apptScheduling.value) return;
+  apptScheduling.value = true;
+  try {
+    await appointmentAPI.scheduleForStudent(apptDetailTarget.value.id, {
+      appointment_date: apptScheduleForm.value.appointment_date,
+      start_time: apptScheduleForm.value.start_time,
+      end_time: apptScheduleForm.value.end_time,
+    });
+    toast?.success('Appointment scheduled for the student.');
+    apptDetailTarget.value = null;
+    await refreshReferralAfterApptChange();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to schedule the appointment.');
+  } finally {
+    apptScheduling.value = false;
+  }
+}
+
+// Sends a Call-Slip directly (same backend action as the existing No-Show
+// modal's "Issue Call Slip" option, just without that modal's extra
+// "ask student to reschedule instead" choice, since Reschedule Appointment
+// right next to it covers that already).
+const callSlipTarget = ref(null);
+const sendingCallSlip = ref(false);
+
+function requestCallSlip(a) {
+  if (!a || a.no_show_escalated) return;
+  callSlipTarget.value = a;
+}
+
+async function confirmCallSlip() {
+  const a = callSlipTarget.value;
+  if (!a || sendingCallSlip.value || a.no_show_escalated) return;
+  sendingCallSlip.value = true;
+  try {
+    const unscheduled = a.request_status === 'awaiting_student';
+    const res = unscheduled
+      ? await appointmentAPI.sendCallSlipUnscheduled(a.id)
+      : await appointmentAPI.escalateNoShow(a.id, 'call_slip');
+    if (!unscheduled) a.status = 'no_show';
+    a.no_show_escalated = true;
+    toast?.success(res.data.message || 'Call-Slip sent.');
+    callSlipTarget.value = null;
+    showCaseNoShowModal.value = false;
+    apptDetailTarget.value = null;
+    await refreshReferralAfterApptChange();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to send Call-Slip.');
+    callSlipTarget.value = null;
+  } finally {
+    sendingCallSlip.value = false;
+  }
+}
+
+const showParentConferenceModal = ref(false);
+const parentConferenceForm = ref({ conference_date: '', conference_time: '', reason: '', remarks: '' });
+const parentConferenceError = ref('');
+const savingParentConference = ref(false);
+const parentConferenceConfirming = ref(false);
+
+const selectedParentConference = ref(null);
+const parentConferenceNotesForm = ref('');
+const savingParentConferenceNotes = ref(false);
+const parentConferenceNotesEditable = computed(() =>
+  isGCU.value && !!selectedParentConference.value
+  && !String(selectedParentConference.value.notes || '').trim() && !isResolved.value);
+
+function viewParentConference(slip) {
+  selectedParentConference.value = slip;
+  parentConferenceNotesForm.value = '';
+}
+function closeParentConferenceDetail() {
+  selectedParentConference.value = null;
+  parentConferenceNotesForm.value = '';
+}
+async function saveParentConferenceNotes() {
+  const slip = selectedParentConference.value;
+  if (!slip || !parentConferenceNotesEditable.value || !parentConferenceNotesForm.value.trim() || savingParentConferenceNotes.value) return;
+  savingParentConferenceNotes.value = true;
+  try {
+    const res = await caseAPI.saveParentConferenceNotes(slip.id, { notes: parentConferenceNotesForm.value });
+    Object.assign(slip, res.data);
+    toast?.success('Parent conference notes saved.');
+    closeParentConferenceDetail();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to save parent conference notes.');
+  } finally {
+    savingParentConferenceNotes.value = false;
+  }
+}
+
+function openParentConferenceModal() {
+  parentConferenceForm.value = { conference_date: '', conference_time: '', reason: '', remarks: '' };
+  parentConferenceError.value = '';
+  parentConferenceConfirming.value = false;
+  showParentConferenceModal.value = true;
+}
+
+// Step 1: validate, then ask for confirmation in the same floating modal
+// before anything is actually issued/sent to the student.
+function confirmParentConferenceSlip() {
+  parentConferenceError.value = '';
+  if (!parentConferenceForm.value.conference_date || !parentConferenceForm.value.conference_time || !parentConferenceForm.value.reason) {
+    parentConferenceError.value = 'Please fill in date, time, and reason.';
+    return;
+  }
+  parentConferenceConfirming.value = true;
+}
+
+async function submitParentConferenceSlip() {
+  parentConferenceError.value = '';
+  if (!parentConferenceForm.value.conference_date || !parentConferenceForm.value.conference_time || !parentConferenceForm.value.reason) {
+    parentConferenceError.value = 'Please fill in date, time, and reason.';
+    return;
+  }
+  savingParentConference.value = true;
+  try {
+    const res = await caseAPI.issueParentConferenceSlip(referral.value.case.id, { ...parentConferenceForm.value, referral_id: referral.value.id });
+    if (!referral.value.case.parent_conference_slips) referral.value.case.parent_conference_slips = [];
+    referral.value.case.parent_conference_slips.unshift(res.data);
+    showParentConferenceModal.value = false;
+    toast?.success('Parent Conference Slip issued. The student has been notified - print/hand the slip to the parent or guardian in person.');
+  } catch (e) {
+    parentConferenceError.value = e.response?.data?.message || 'Failed to issue slip.';
+    parentConferenceConfirming.value = false;
+  } finally {
+    savingParentConference.value = false;
+  }
+}
+
+// Follow-up notes are write-once: editable only until first saved, and never
+// on a closed SIF.
+const followUpNotesEditable = computed(() =>
+  !!selectedFollowUp.value && !String(selectedFollowUp.value.notes || '').trim() && !isResolved.value);
+
+function viewFollowUp(fu) {
+  selectedFollowUp.value  = fu;
+  followUpNotesForm.value = fu.notes || '';
+}
+
+function closeFollowUpDetail() {
+  selectedFollowUp.value  = null;
+  followUpNotesForm.value = '';
+}
+
+async function saveFollowUpNotes() {
+  const fu = selectedFollowUp.value;
+  if (!fu || !followUpNotesEditable.value || !followUpNotesForm.value.trim()) return;
+  try {
+    const res = await appointmentAPI.update(fu.id, { notes: followUpNotesForm.value });
+    const updated = res?.data || { ...fu, notes: followUpNotesForm.value };
+    Object.assign(fu, updated);
+    const idx = followUps.value.findIndex(f => f.id === fu.id);
+    if (idx !== -1) followUps.value[idx] = { ...followUps.value[idx], ...updated };
+    toast?.success('Follow-up notes saved.');
+    closeFollowUpDetail();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to save follow-up notes.');
+  }
+}
+
+// B252: never allow picking a day that's already gone.
+const todayStr = new Date().toISOString().split('T')[0];
+
+const showFollowUpConfirm = ref(false);
+
+const { load: loadBlockedDates, messageFor: blockedMessageFor } = useBlockedDates('staff');
+// B628 (10/30/2026): also checks office hours (8:00 AM - 4:00 PM) now - the
+// date-only check left a 6 PM follow-up, say, with no warning at all until
+// the backend rejected it (store() didn't even enforce this server-side
+// until this same fix - see AppointmentController::store()).
+const followUpBlockedMsg = computed(() =>
+  blockedMessageFor(followUpForm.value.appointment_date) || officeHoursMessage(followUpForm.value.start_time, followUpForm.value.end_time));
+// Bug (10/30/2026): this "Schedule Now" date input had no :min and no
+// holiday/suspension check at all - staff could pick a past date or a
+// blocked one here and the backend's own scheduleForStudent() didn't catch
+// it either (see that controller fix). Same pattern as followUpForm above.
+const apptScheduleBlockedMsg = computed(() =>
+  blockedMessageFor(apptScheduleForm.value.appointment_date) || officeHoursMessage(apptScheduleForm.value.start_time, apptScheduleForm.value.end_time));
+
+function openFollowUpModal() {
+  loadBlockedDates();
+  followUpError.value = '';
+  followUpForm.value = { appointment_date: '', start_time: '', end_time: '', staff_user_id: '', notes: '' };
+  showFollowUpModal.value = true;
+}
+
+// B252: require an explicit confirmation step before actually booking.
+function openFollowUpConfirm() {
+  followUpError.value = '';
+  if (!followUpForm.value.appointment_date || !followUpForm.value.start_time || !followUpForm.value.end_time) {
+    followUpError.value = 'Please fill in the date and time.';
+    return;
+  }
+  if (followUpForm.value.appointment_date < todayStr) {
+    followUpError.value = 'Follow-up date cannot be in the past.';
+    return;
+  }
+  if (followUpBlockedMsg.value) {
+    followUpError.value = followUpBlockedMsg.value;
+    return;
+  }
+  showFollowUpConfirm.value = true;
+}
+
+async function saveFollowUp() {
+  if (schedulingFollowUp.value) return; // guard against double-click / double-submit
+  schedulingFollowUp.value = true;
+  try {
+    const res = await appointmentAPI.store({
+      case_id:           referral.value.case.id,
+      referral_id:       referral.value.id,
+      student_id:        referral.value.student.id,
+      staff_user_id:     followUpForm.value.staff_user_id || null,
+      unit:              referral.value.case.current_unit || 'GCU',
+      appointment_type:  'follow_up_session',
+      appointment_date:  followUpForm.value.appointment_date,
+      start_time:        followUpForm.value.start_time,
+      end_time:          followUpForm.value.end_time,
+      notes:             followUpForm.value.notes,
+    });
+    // Guard against the same follow-up landing in the list twice (e.g. if a
+    // slow request resolves after a retry already added it).
+    if (!followUps.value.some(f => f.id === res.data.id)) {
+      followUps.value.push(res.data);
+      followUpsPage.value = followUpsTotalPages.value;
+    }
+    showFollowUpConfirm.value = false;
+    showFollowUpModal.value = false;
+    toast?.success('Follow-up session scheduled.');
+  } catch (e) {
+    followUpError.value = e.response?.data?.message || 'Failed to schedule follow-up.';
+    showFollowUpConfirm.value = false;
+  } finally {
+    schedulingFollowUp.value = false;
+  }
+}
+
+onMounted(async () => {
+  try {
+    const res = await referralAPI.show(route.params.id);
+    referral.value = res.data;
+    // The compose form always starts blank - each send is its own new
+    // history entry (see referral.feedback_slips), never an edit of a
+    // previous one, so there is nothing to pre-fill from.
+    feedbackForm.value.feedback_ctrl_no = res.data.feedback_ctrl_no || '';
+
+    if (isGCU.value) {
+      const notesRes = await sessionNoteAPI.indexByReferral(route.params.id);
+      sessionNotes.value = notesRes.data;
+
+      try {
+        const staffRes = await userAPI.roster();
+        staffList.value = (staffRes.data.data || staffRes.data).filter(u => ['admin', 'gcu_staff'].includes(u.role));
+      } catch (e) {
+        // Non-fatal - staff dropdowns just fall back to empty.
+      }
+    }
+
+    if (res.data.case) {
+      const apptRes = await appointmentAPI.index({ referral_id: route.params.id, appointment_type: 'follow_up_session' });
+      followUps.value = (apptRes.data.data || apptRes.data);
+    }
+  } catch (e) {
+    console.error(e);
+  } finally {
+    loading.value = false;
+  }
+  fetchDocSettings('QF-OSS-01', referralDoc);
+  fetchDocSettings('QF-OSS-03', feedbackDoc);
+  fetchDocSettings('QF-OSS-GCU-09', admissionDoc);
+});
+</script>
+
+<style scoped>
+/* Refer to TMDU: laid out like the Refer a Student form */
+.tf-sec { display: flex; align-items: center; gap: 10px; margin: 4px 0 10px; font-size: 10px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; color: var(--fog); }
+.tf-sec::after { content: ''; flex: 1; height: 1px; background: var(--cloud); }
+.tf-row, .tf-grid { margin-bottom: 14px; }
+.tf-grid { display: grid; gap: 12px; }
+.tf-names { grid-template-columns: 1.3fr 1.3fr 1.3fr .8fr .9fr; }
+.tf-two { grid-template-columns: 1fr 1fr; }
+.tf-three { grid-template-columns: 1fr 1fr 1fr; }
+.tf-ro { background: var(--snow); color: var(--slate); cursor: default; }
+@media (max-width: 860px) { .tf-names, .tf-two, .tf-three { grid-template-columns: 1fr 1fr; } }
+</style>

@@ -1,0 +1,1287 @@
+<template>
+  <div class="fade-up">
+    <!-- Page Header -->
+    <div class="ph" style="margin-bottom:20px;display:flex;align-items:center;gap:10px">
+      <!-- B241: reached from inside a Student Information File (e.g. "Schedule
+           Appointment" on the Referral Details page), this carries a
+           return_to query so staff can get back to exactly where they were,
+           instead of having to re-find the case afterward. -->
+      <button v-if="returnTo" class="ibtn ibtn-o ibtn-sm" @click="goBackToSif">
+        <svg viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+      </button>
+      <div>
+        <h1>GCU Appointments</h1>
+        <p>Confirm, reschedule, or manage student-requested appointments.</p>
+      </div>
+    </div>
+
+    <!-- Filter Bar: above both columns, so the list and the calendar start level.
+         Bug (10/25/2026, B625): the Unit filter (All Units/GCU/SDU/TMDU) was
+         removed - this page only ever shows GCU appointments (the backend
+         excludes SDU and TMDU for this role no matter what's picked here),
+         so the options other than GCU were dead ends that looked like they
+         should work. -->
+    <div class="filter-bar">
+      <!-- Bug (10/30/2026): this used the .fsm class, which is styled for a
+           <select> and bakes in a dropdown chevron background-image (plus
+           cursor:pointer) - on a plain text input that chevron just sat on
+           the right looking like a dropdown that wasn't one. Switched to
+           the .sw/.sin search-input pattern already used on
+           students/Index.vue and referrals/Index.vue. -->
+      <div class="sw" style="flex:1;min-width:220px;max-width:400px">
+        <svg class="sw-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input
+          v-model="filters.search"
+          type="text"
+          class="sin"
+          maxlength="50"
+          placeholder="Search by student name, ID, or appointment code..."
+          style="width:100%"
+          @keypress="blockSpecialKeypress"
+          @input="onSearchInput"
+        />
+      </div>
+      <select v-model="filters.status" class="fsm" @change="fetchAppointments">
+        <option value="">All</option>
+        <option value="pending">Pending</option>
+        <option value="confirmed">Confirmed</option>
+        <option value="no_show">No Show</option>
+        <option value="rescheduled">Rescheduled</option>
+        <!-- B#, 11/4/2026: "Expired" was only ever a badge/label computed
+             client-side (isApptExpired()) for an awaiting_student row whose
+             scheduling link had lapsed - there was no way to filter the list
+             down to just those, only to "Rescheduled" (every awaiting_student
+             row, expired or not). The backend now understands this value too
+             (AppointmentController::index()). -->
+        <option value="expired">Expired</option>
+        <option value="cancelled">Cancelled</option>
+        <option value="completed">Completed</option>
+      </select>
+      <button class="ibtn ibtn-o ibtn-sm" @click="resetFilters">Reset</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 320px;gap:16px">
+
+      <!-- Left: Appointments List -->
+      <div style="display:flex;flex-direction:column;gap:16px">
+
+        <!-- Appointments -->
+        <div class="icard">
+          <div v-if="loading" style="text-align:center;padding:44px">
+            <div style="width:24px;height:24px;border:2px solid var(--mint);border-top-color:var(--moss);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto"></div>
+          </div>
+          <div v-else-if="appointments.length === 0 && blockedForPreview" class="empty-state">
+            <h3>{{ blockedForPreview.name || blockedForPreview.label }}</h3>
+            <p>{{ previewDateLabel }}: {{ blockedForPreview.type ? blockedTypeLabel(blockedForPreview.type) + '. ' : '' }}Appointments cannot be scheduled on this date.</p>
+          </div>
+          <div v-else-if="appointments.length === 0" class="empty-state">
+            <h3>No appointments found</h3>
+            <p>Appointments will appear here once students request them from their acknowledged referrals.</p>
+          </div>
+          <div v-else>
+            <div
+              v-for="a in appointments"
+              :key="a.id"
+              class="appt-row"
+              style="display:flex;align-items:flex-start;gap:12px;padding:14px 18px;border-bottom:1px solid var(--cloud);transition:background .1s;cursor:pointer"
+              @mouseover="$event.currentTarget.style.background='var(--foam)'"
+              @mouseleave="$event.currentTarget.style.background=''"
+              @click="openApptDetail(a)"
+            >
+              <div v-if="a.request_status !== 'awaiting_student' || a.status === 'cancelled'" style="width:48px;text-align:center;background:var(--snow);border-radius:var(--r-sm);padding:6px 4px;flex-shrink:0;border:1px solid var(--cloud)">
+                <div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--fog)">{{ getMonth(a.appointment_date) }}</div>
+                <div style="font-size:20px;font-weight:700;color:var(--forest);font-family:var(--serif);font-style:italic;line-height:1">{{ getDay(a.appointment_date) }}</div>
+              </div>
+              <div v-else style="width:48px;text-align:center;background:var(--amber-lt);border-radius:var(--r-sm);padding:6px 4px;flex-shrink:0;border:1px solid var(--amber);display:flex;align-items:center;justify-content:center">
+                <svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:var(--amber);fill:none;stroke-width:2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              </div>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+                  <div style="font-size:13.5px;font-weight:600;color:var(--ink)">{{ a.student?.last_name }}, {{ a.student?.first_name }}</div>
+                  <div style="font-size:11px;color:var(--fog);font-family:var(--mono)">{{ a.appointment_code }}</div>
+                  <div v-if="a.referral?.referral_code" style="font-size:11px;color:var(--blue);font-family:var(--mono);background:var(--blue-lt);padding:1px 6px;border-radius:4px">{{ a.referral.referral_code }}</div>
+                  <div v-if="a.case?.case_number" style="font-size:11px;color:var(--moss);font-family:var(--mono);background:var(--mist);padding:1px 6px;border-radius:4px">{{ a.case.case_number }}</div>
+                </div>
+                <div v-if="isApptExpired(a)" style="font-size:11.5px;color:var(--red);margin-top:2px">
+                  Student's scheduling link has expired - use Schedule Now to set it manually.
+                </div>
+                <div v-else-if="a.request_status === 'awaiting_student' && a.status !== 'cancelled'" style="font-size:11.5px;color:var(--amber);margin-top:2px">
+                  {{ a.reschedule_reason ? 'Reschedule Needed - Waiting for Student' : 'Waiting for Student to Pick a Schedule' }}
+                </div>
+                <div v-else style="font-size:11.5px;color:var(--stone);margin-top:2px">
+                  {{ toTitleCase(a.appointment_type) }} · {{ fmt12(a.start_time) }} – {{ fmt12(a.end_time) }} · {{ a.staff?.name || 'TBA' }}
+                </div>
+                <div style="display:flex;gap:5px;margin-top:6px;flex-wrap:wrap">
+                  <span class="ibadge" :class="apptBadgeClass(a)">{{ statusText(a) }}</span>
+                  <span class="ibadge" :class="'unit-' + a.unit?.toLowerCase()">{{ a.unit }}</span>
+                  <!-- The status badge already says "Awaiting Student"; this one only adds that it is a reschedule. -->
+                  <span v-if="a.request_status === 'awaiting_student' && a.status !== 'cancelled' && a.reschedule_reason" class="ibadge" style="background:var(--amber-lt);color:var(--amber)">
+                    Rescheduling
+                  </span>
+                  <!-- rescheduled_from_id stays set once the student picks a
+                       new date/time (request_status moves off
+                       awaiting_student), so this keeps the "this is a
+                       reschedule" signal visible even after that point,
+                       instead of disappearing once it's no longer waiting
+                       on the student. -->
+                  <span v-if="(a.rescheduled_from_id || a.times_rescheduled > 0) && a.request_status !== 'awaiting_student'" class="ibadge" style="background:var(--blue-lt);color:var(--blue)" title="This appointment was created from a reschedule request.">
+                    Rescheduled
+                  </span>
+                  <!-- A Call Slip went to the Dean's Secretary for this appointment -->
+                  <span v-if="callSlipLabel(a)" class="ibadge ibadge-callslip" :title="callSlipTitle(a)">{{ callSlipLabel(a) }}</span>
+                  <!-- B534: flagged because its date was declared a holiday/suspension after it was booked. -->
+                  <span v-if="a.holiday_conflict_label" class="ibadge" style="background:var(--red-lt);color:var(--red)" title="This appointment's date was declared a holiday or class suspension after it was booked.">{{ a.holiday_conflict_label }}</span>
+                  <span v-if="a.location" style="font-size:11px;color:var(--stone)">📍 {{ a.location }}</span>
+                </div>
+              </div>
+              <div class="appt-actions" style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;max-width:220px;justify-content:flex-end">
+                <button v-if="a.status === 'pending' && a.request_status !== 'awaiting_student'" class="ibtn ibtn-p ibtn-sm" @click.stop="openConfirm(a)">Confirm</button>
+                <button v-if="a.status === 'confirmed'" class="ibtn ibtn-o ibtn-sm" @click.stop="checkIn(a)">Student Attended</button>
+                <button v-if="a.status === 'confirmed'" class="ibtn ibtn-sm" style="background:var(--amber-lt);color:var(--amber);border:1.5px solid var(--amber)" @click.stop="openNoShow(a)">No-Show</button>
+                <button v-if="['pending','confirmed'].includes(a.status) && a.request_status !== 'awaiting_student'" class="ibtn ibtn-sm" style="background:var(--blue-lt);color:var(--blue);border:1.5px solid var(--blue)" @click.stop="openReschedule(a)">Request Reschedule</button>
+                <button v-if="a.status !== 'cancelled' && a.status !== 'completed'" class="ibtn ibtn-sm" style="background:var(--red-lt);color:var(--red);border:1.5px solid #f5c0c0" @click.stop="openCancel(a)">Cancel</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pagination -->
+          <div v-if="pagination.last_page > 1" style="padding:12px 18px;border-top:1px solid var(--cloud);display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:12px;color:var(--stone)">
+              Showing {{ pagination.from }}-{{ pagination.to }} of {{ pagination.total }}
+            </span>
+            <div style="display:flex;gap:6px">
+              <button class="ibtn ibtn-o ibtn-sm" :disabled="pagination.current_page === 1" @click="changePage(pagination.current_page - 1)">Prev</button>
+              <button class="ibtn ibtn-o ibtn-sm" :disabled="pagination.current_page === pagination.last_page" @click="changePage(pagination.current_page + 1)">Next</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right: Mini Calendar - floating/sticky to match the SIF's
+           Appointments card, so it (and the day-filter) stay reachable
+           while scrolling a long appointments list. No max-height/
+           overflow-y here - that made this column scroll internally on
+           top of the page's own scroll, which felt like a glitchy double
+           scroll instead of one smooth motion. -->
+      <div class="appt-cal" style="display:flex;flex-direction:column;gap:16px;position:sticky;top:16px;align-self:start">
+        <div class="icard">
+          <div class="icard-header">
+            <span class="icard-title">{{ currentMonthLabel }}</span>
+            <div style="display:flex;gap:4px">
+              <button class="ibtn ibtn-g ibtn-sm" @click="prevMonth">‹</button>
+              <button class="ibtn ibtn-g ibtn-sm" @click="nextMonth">›</button>
+            </div>
+          </div>
+          <div style="padding:12px">
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px">
+              <div v-for="d in ['Su','Mo','Tu','We','Th','Fr','Sa']" :key="d" style="text-align:center;font-size:9px;font-weight:700;color:var(--fog);padding:3px">{{ d }}</div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">
+              <div
+                v-for="day in calendarDays"
+                :key="day.key"
+                :title="[day.blocked ? 'Unavailable - ' + day.blocked.label : '', day.apptTitle].filter(Boolean).join('\n')"
+                style="aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:4px;font-size:10.5px;cursor:pointer;position:relative"
+                :style="{
+                  background: day.isToday ? 'var(--moss)' : day.isSelected ? 'var(--mist)' : day.blocked ? 'var(--red-lt)' : '',
+                  outline: day.blocked ? '1px solid #f5c0c0' : '',
+                  color: day.isToday ? '#fff' : day.isOther ? 'var(--silver)' : 'var(--slate)',
+                  fontWeight: day.isToday ? '600' : '',
+                  pointerEvents: day.isOther ? 'none' : 'auto',
+                }"
+                @click="day.isOther ? null : selectDayPreview(day)"
+              >
+                {{ day.date }}
+                <span v-if="day.blocked" style="width:4px;height:4px;border-radius:50%;background:var(--red);margin-top:1px"></span>
+                <span
+                  v-if="day.apptCount > 0"
+                  style="font-size:8px;line-height:1;margin-top:1px;padding:0 3px;border-radius:6px;font-weight:700"
+                  :style="day.isToday ? 'background:rgba(255,255,255,.25);color:#fff' : 'background:var(--moss);color:#fff'"
+                >
+                  {{ day.apptCount }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- B546: brought back from the B532 cut, now conditional - it's useful
+             context while browsing the month with nothing picked yet, but once a
+             date is selected (blocked or not) the calendar's own red dot/background
+             already says enough, so the list steps aside instead of piling on. It
+             recomputes off blockedMap/currentMonth/currentYear, so switching months
+             updates it with no extra wiring. -->
+        <div v-if="!previewDate && blockedThisMonth.length" class="icard">
+          <div class="icard-header">
+            <span class="icard-title">Unavailable this month</span>
+          </div>
+          <div style="padding:10px 14px;display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto">
+            <div v-for="b in blockedThisMonth" :key="b.date" style="display:flex;justify-content:space-between;gap:10px;font-size:12px">
+              <span style="color:var(--slate);font-weight:600">{{ b.day }}</span>
+              <span style="color:var(--stone);text-align:right">{{ b.label }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Appointment Detail Modal: wide and short - the facts in three columns,
+         the actions in one row, and the GCU Head's status override folded
+         away until it is needed. -->
+    <div v-if="detailTarget" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="detailTarget = null">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:680px;overflow:hidden;box-shadow:var(--sh-lg)">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <div style="min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="font-size:16px;font-weight:600;color:var(--ink)">{{ detailTarget.student?.last_name }}, {{ detailTarget.student?.first_name }}</span>
+              <span v-if="detailTarget.referral?.referral_code" style="font-size:11px;color:var(--blue);font-family:var(--mono);background:var(--blue-lt);padding:1px 6px;border-radius:4px">{{ detailTarget.referral.referral_code }}</span>
+              <span class="ibadge" :class="apptBadgeClass(detailTarget)">{{ statusText(detailTarget) }}</span>
+              <span v-if="detailTarget.rescheduled_from_id || detailTarget.times_rescheduled > 0" class="ibadge" style="background:var(--blue-lt);color:var(--blue)">Rescheduled</span>
+              <span v-if="callSlipLabel(detailTarget)" class="ibadge ibadge-callslip" :title="callSlipTitle(detailTarget)">{{ callSlipLabel(detailTarget) }}</span>
+              <span v-if="detailTarget.holiday_conflict_label" class="ibadge" style="background:var(--red-lt);color:var(--red)">{{ detailTarget.holiday_conflict_label }}</span>
+            </div>
+            <div style="font-size:11.5px;color:var(--fog);margin-top:3px">
+              Appointment <span style="font-family:var(--mono)">{{ detailTarget.appointment_code }}</span>
+              <template v-if="detailTarget.referral?.referral_code"> · <span style="font-family:var(--mono)">{{ detailTarget.referral.referral_code }}</span></template>
+              <template v-if="detailTarget.case?.case_number"> · <span style="font-family:var(--mono)">{{ detailTarget.case.case_number }}</span></template>
+            </div>
+          </div>
+          <button class="ibtn ibtn-g ibtn-sm" style="flex:none" @click="detailTarget = null">✕</button>
+        </div>
+
+        <div style="padding:18px 22px;display:flex;flex-direction:column;gap:14px">
+          <div class="ad-grid">
+            <div>
+              <div class="ad-label">Date</div>
+              <div class="ad-value">{{ formatApptDate(detailTarget.appointment_date) }}</div>
+            </div>
+            <div>
+              <div class="ad-label">Time</div>
+              <div class="ad-value">{{ fmt12(detailTarget.start_time) }} – {{ fmt12(detailTarget.end_time) }}</div>
+            </div>
+            <div>
+              <div class="ad-label">Type</div>
+              <div class="ad-value">{{ toTitleCase(detailTarget.appointment_type) }}</div>
+            </div>
+            <div>
+              <div class="ad-label">Staff</div>
+              <div class="ad-value">{{ detailTarget.staff?.name || 'TBA' }}</div>
+            </div>
+            <div>
+              <div class="ad-label">Unit</div>
+              <span class="ibadge" :class="'unit-' + detailTarget.unit?.toLowerCase()">{{ detailTarget.unit }}</span>
+            </div>
+            <div v-if="detailTarget.reschedule_count">
+              <div class="ad-label">Times Rescheduled</div>
+              <div class="ad-value">{{ detailTarget.reschedule_count }}</div>
+            </div>
+            <div v-if="detailTarget.location">
+              <div class="ad-label">Location</div>
+              <div class="ad-value">{{ detailTarget.location }}</div>
+            </div>
+          </div>
+
+          <div v-if="detailTarget.required_documents || detailTarget.notes" class="ad-notes">
+            <div v-if="detailTarget.required_documents">
+              <div class="ad-label">Required Documents</div>
+              <div class="ad-value"><RequiredDocumentsDownload :documents="detailTarget.required_documents" /></div>
+            </div>
+            <div v-if="detailTarget.notes">
+              <div class="ad-label">Notes</div>
+              <div class="ad-value" style="white-space:pre-line">{{ detailTarget.notes }}</div>
+            </div>
+          </div>
+
+          <!-- Bug (10/25/2026): schedule a date/time directly for the student,
+               instead of waiting on them to use their own scheduling link, used
+               to only be reachable by first opening "Override Status" - an
+               admin-correction tool, not where staff would think to look for an
+               everyday action. It's now its own clearly-labeled section, shown
+               to Admin/GCU Staff any time the student hasn't picked a schedule
+               yet - the student's own scheduling link still works exactly as
+               before if staff leave this alone. -->
+          <div v-if="canOverride && detailTarget.request_status === 'awaiting_student' && detailTarget.status !== 'cancelled'" class="ad-override" style="background:var(--moss-lt,var(--foam));border-color:var(--moss)">
+            <div class="ad-label" style="margin-bottom:2px;color:var(--moss)">Schedule Now</div>
+            <div style="font-size:11.5px;color:var(--stone);margin-bottom:8px">This student is still waiting to pick their own schedule. Set a date and time yourself instead, or leave this and let them use their scheduling link.</div>
+            <div class="ad-override-row">
+              <input v-model="scheduleForm.appointment_date" type="date" class="ifi" :min="todayStr" />
+              <input v-model="scheduleForm.start_time" type="time" class="ifi" min="08:00" max="16:00" />
+              <input v-model="scheduleForm.end_time" type="time" class="ifi" min="08:00" max="16:00" />
+              <button class="ibtn ibtn-p ibtn-sm" style="justify-content:center;white-space:nowrap" :disabled="!scheduleForm.appointment_date || !scheduleForm.start_time || !scheduleForm.end_time || schedulingStudent || !!scheduleWarningMsg" @click="applyScheduleStudent">
+                {{ schedulingStudent ? 'Scheduling...' : 'Schedule Now' }}
+              </button>
+            </div>
+            <div v-if="scheduleWarningMsg" style="font-size:11px;color:var(--red);margin-top:4px">{{ scheduleWarningMsg }}</div>
+          </div>
+
+          <!-- Admin / GCU Staff only: manually override the appointment's status -->
+          <div v-if="overrideOpen && canOverride && detailTarget.unit !== 'TMDU'" class="ad-override">
+            <div class="ad-label" style="margin-bottom:6px">Override Status</div>
+            <div class="ad-override-row">
+              <select v-model="overrideForm.target" class="ifse">
+                <option value="">Change status to...</option>
+                <option value="awaiting_student">Waiting for Student to Pick a Schedule</option>
+                <option value="pending_confirmation">Pending (Awaiting Confirmation)</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="completed">Attended / Completed</option>
+                <option value="no_show">No-Show</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+              <input v-model="overrideForm.reason" class="ifi" maxlength="255" placeholder="Reason for the change (required)" @keyup.enter="applyOverride" />
+              <button class="ibtn ibtn-p ibtn-sm" style="justify-content:center;white-space:nowrap" :disabled="!overrideForm.target || overrideForm.reason.trim().length < 5 || overridingStatus" @click="applyOverride">
+                {{ overridingStatus ? 'Updating...' : 'Apply' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actions: what can be done with this appointment on the left, the case file on the right -->
+        <div class="ad-foot">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <template v-if="!['cancelled','completed'].includes(detailTarget.status)">
+              <button v-if="detailTarget.status === 'pending' && detailTarget.request_status !== 'awaiting_student'" class="ibtn ibtn-p ibtn-sm" @click="openConfirm(detailTarget); detailTarget = null">Confirm Appointment</button>
+              <button v-if="detailTarget.status === 'confirmed'" class="ibtn ibtn-o ibtn-sm" @click="checkIn(detailTarget)">Mark Attended</button>
+              <button v-if="detailTarget.status === 'confirmed'" class="ibtn ibtn-sm" style="background:var(--amber-lt);color:var(--amber);border:1.5px solid var(--amber)" @click="openNoShow(detailTarget); detailTarget = null">Mark No-Show</button>
+              <button v-if="['pending','confirmed'].includes(detailTarget.status) && detailTarget.request_status !== 'awaiting_student'" class="ibtn ibtn-sm" style="background:var(--blue-lt);color:var(--blue);border:1.5px solid var(--blue)" @click="openReschedule(detailTarget); detailTarget = null">Request Reschedule</button>
+              <button v-if="canSendCallSlip(detailTarget)" class="ibtn ibtn-sm" style="background:var(--amber-lt);color:var(--amber);border:1.5px solid var(--amber)" @click="callSlipPrompt = true">Send Call Slip</button>
+              <button class="ibtn ibtn-sm" style="background:var(--red-lt);color:var(--red);border:1.5px solid #f5c0c0" @click="openCancel(detailTarget); detailTarget = null">Cancel Appointment</button>
+            </template>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-left:auto">
+            <button v-if="canOverride && detailTarget.unit !== 'TMDU'" class="ibtn ibtn-g ibtn-sm" @click="overrideOpen = !overrideOpen">{{ overrideOpen ? 'Hide Override' : 'Override Status' }}</button>
+            <button class="ibtn ibtn-o ibtn-sm" @click="goToReferral(detailTarget)">View Case File</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Send Call Slip confirmation (student has not picked a schedule yet).
+         Floats over Appointment Details instead of stretching it. -->
+    <div v-if="callSlipPrompt && detailTarget && canSendCallSlip(detailTarget)" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:70;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="!sendingCallSlip && (callSlipPrompt = false)">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:400px;overflow:hidden;box-shadow:var(--sh-lg)">
+        <div style="padding:18px 22px;border-bottom:1px solid var(--cloud)">
+          <div style="font-size:15px;font-weight:600;color:var(--ink)">Send Call Slip?</div>
+          <div style="font-size:11px;color:var(--fog);font-family:var(--mono);margin-top:2px">{{ detailTarget.appointment_code }}</div>
+        </div>
+        <div style="padding:20px 22px;display:flex;flex-direction:column;gap:16px">
+          <div style="font-size:13px;color:var(--ink);line-height:1.55">
+            This asks the College Dean to follow up with
+            <strong>{{ detailTarget.student?.first_name }} {{ detailTarget.student?.last_name }}</strong>,
+            who has not picked a schedule yet. It does not mark a no-show.
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="ibtn ibtn-p" style="flex:1;justify-content:center" :disabled="sendingCallSlip" @click="sendCallSlip">{{ sendingCallSlip ? 'Sending...' : 'Yes, Send Call Slip' }}</button>
+            <button class="ibtn ibtn-o" style="flex:1;justify-content:center" :disabled="sendingCallSlip" @click="callSlipPrompt = false">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirm & Assign Staff Modal -->
+    <div v-if="showConfirmModal" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showConfirmModal = false">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:420px;overflow:hidden;box-shadow:var(--sh-lg)">
+        <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between">
+          <div style="font-size:15px;font-weight:600;color:var(--ink)">Confirm Appointment</div>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+          <div style="background:var(--snow);border-radius:var(--r-sm);padding:12px 14px;display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:13px;color:var(--ink)">
+              <strong>{{ confirmTarget?.student?.last_name }}, {{ confirmTarget?.student?.first_name }}</strong>
+              <span style="color:var(--stone)"> · {{ confirmTarget?.student?.student_id }}</span>
+            </div>
+            <div v-if="confirmReferral" style="font-size:12px;color:var(--stone)">
+              <div style="font-weight:600;color:var(--fog);text-transform:uppercase;letter-spacing:.5px;font-size:10px;margin-bottom:2px">Reason for Referral / Concern</div>
+              {{ confirmReferral.nature_of_concern || '-' }}
+            </div>
+          </div>
+          <div>
+            <label class="ifl">Assign Staff</label>
+            <select v-model="confirmStaffId" class="ifse">
+              <option value="">Keep current / Auto-assign</option>
+              <option v-for="u in staffList" :key="u.id" :value="u.id">{{ u.name }} ({{ roleLabel(u.role) }})</option>
+            </select>
+          </div>
+          <div v-if="confirmStaffId" style="font-size:12px;color:var(--stone);background:var(--cloud);border-radius:var(--r-sm);padding:10px 12px">
+            <div v-if="loadingAvailability">Checking schedule...</div>
+            <template v-else>
+              <div style="font-weight:600;color:var(--ink);margin-bottom:4px">Schedule for {{ confirmTarget?.appointment_date?.split('T')[0] }}</div>
+              <div v-if="blockedMap[confirmTarget?.appointment_date?.split('T')[0]]" style="color:var(--red);font-weight:600;margin-bottom:4px">
+                This date is not available: {{ blockedMap[confirmTarget?.appointment_date?.split('T')[0]].label }}.
+              </div>
+              <div v-if="staffAvailability?.booked_slots?.length" style="display:flex;flex-direction:column;gap:2px">
+                <div v-for="(slot, i) in staffAvailability.booked_slots" :key="i" :style="isOverlapping(slot) ? 'color:var(--red);font-weight:600' : ''">
+                  {{ formatTime12(slot.start_time) }}–{{ formatTime12(slot.end_time) }} · {{ toTitleCase(slot.appointment_type) }}
+                  <span v-if="isOverlapping(slot)">(conflicts with this appointment)</span>
+                </div>
+              </div>
+              <div v-else>No other appointments booked for this staff that day.</div>
+            </template>
+          </div>
+          <div>
+            <label class="ifl">Required Documents (leave blank if none)</label>
+            <textarea v-model="confirmRequiredDocuments" class="ifta" style="min-height:60px" placeholder="e.g. Valid ID, parent consent form" maxlength="1000"></textarea>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="ibtn ibtn-p" @click="submitConfirm">Confirm Appointment</button>
+            <button class="ibtn ibtn-o" @click="showConfirmModal = false">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reschedule Request Modal -->
+    <div v-if="showCancelModal" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showCancelModal = false">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:440px;overflow:hidden;box-shadow:var(--sh-lg)">
+        <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between">
+          <div style="font-size:15px;font-weight:600;color:var(--ink)">Cancel Appointment</div>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+          <div style="font-size:13px;color:var(--stone);line-height:1.6">
+            This cannot be undone. The student will be notified that this appointment was cancelled.
+          </div>
+          <div>
+            <label class="ifl">Reason for Cancellation <span style="color:var(--red)">*</span></label>
+            <textarea v-model="cancelForm.cancellation_reason" class="ifta" style="min-height:80px" placeholder="Why is this appointment being cancelled?" maxlength="1000"></textarea>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="ibtn" style="flex:1;justify-content:center;background:var(--red-lt);color:var(--red);border:1.5px solid #f5c0c0" @click="submitCancel">Yes, Cancel Appointment</button>
+            <button class="ibtn ibtn-o" style="flex:1;justify-content:center" @click="showCancelModal = false">Never Mind</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- No-Show Confirmation Modal - GCU's own call on whether this gets a
+         Call Slip (escalated to Dean's Secretary) or is just marked so the
+         student can be asked to reschedule, not an automatic threshold. -->
+    <div v-if="showNoShowModal" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showNoShowModal = false">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:440px;overflow:hidden;box-shadow:var(--sh-lg)">
+        <div style="padding:20px 22px;border-bottom:1px solid var(--cloud)">
+          <div style="font-size:15px;font-weight:600;color:var(--ink)">Mark as No-Show</div>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+          <div style="font-size:13px;color:var(--slate);line-height:1.6">
+            Marking <strong>{{ noShowTarget?.student?.last_name }}, {{ noShowTarget?.student?.first_name }}</strong>'s appointment as a no-show.
+            <span v-if="noShowTarget?.case?.no_show_count">This case has {{ noShowTarget.case.no_show_count }} prior no-show{{ noShowTarget.case.no_show_count > 1 ? 's' : '' }}.</span>
+            Choose how to handle it:
+          </div>
+          <div v-if="callSlipConfirming" style="border:1px solid #f0a8a8;background:var(--red-lt);border-radius:var(--r-sm);padding:14px;display:flex;flex-direction:column;gap:10px">
+            <div style="font-size:13px;color:var(--ink);line-height:1.5"><strong>Send Call-Slip?</strong> This escalates the appointment to the College Dean. A Call-Slip can only be sent <strong>once</strong> and cannot be undone.</div>
+            <div style="display:flex;gap:8px">
+              <button class="ibtn" style="flex:1;justify-content:center;background:#fff;color:var(--red);border:1.5px solid #f0a8a8" :disabled="submittingNoShow" @click="submitNoShow('call_slip')">{{ submittingNoShow ? 'Sending...' : 'Yes, Send Call-Slip' }}</button>
+              <button class="ibtn ibtn-o" style="flex:1;justify-content:center" :disabled="submittingNoShow" @click="callSlipConfirming = false">Go Back</button>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <button v-if="!callSlipConfirming" class="ibtn" style="justify-content:center;background:var(--amber-lt);color:var(--amber);border:1.5px solid var(--amber)" :disabled="submittingNoShow" @click="submitNoShow('reschedule')">
+              {{ submittingNoShow ? 'Marking...' : 'Mark & Ask Student to Reschedule' }}
+            </button>
+            <button v-if="!noShowTarget?.no_show_escalated && !callSlipConfirming" class="ibtn" style="justify-content:center;background:var(--red-lt);color:var(--red);border:1.5px solid #f0a8a8" :disabled="submittingNoShow" @click="callSlipConfirming = true">
+              Issue Call Slip (Escalate to Dean\'s Secretary)
+            </button>
+            <button class="ibtn ibtn-o" style="justify-content:center" @click="showNoShowModal = false">Never Mind</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showRescheduleModal" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showRescheduleModal = false">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:440px;overflow:hidden;box-shadow:var(--sh-lg)">
+        <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between">
+          <div style="font-size:15px;font-weight:600;color:var(--ink)">Request Reschedule</div>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+          <div style="font-size:13px;color:var(--stone);line-height:1.6">
+            This will notify the student to pick a different appointment time from their dashboard.
+          </div>
+          <div>
+            <label class="ifl">Reason for Reschedule <span style="color:var(--red)">*</span></label>
+            <textarea v-model="rescheduleForm.reschedule_reason" class="ifta" style="min-height:80px" placeholder="Why does this need to be rescheduled?" maxlength="1000"></textarea>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="ibtn ibtn-p" :disabled="!rescheduleForm.reschedule_reason" @click="submitReschedule">Send Reschedule Request</button>
+            <button class="ibtn ibtn-o" @click="showRescheduleModal = false">Cancel</button>
+          </div>
+
+          <!-- B628 (10/30/2026, revised): "Reschedule Now" - lets staff pick
+               the new date/time themselves and lock it in right away,
+               instead of only being able to send the student a request to
+               pick one. No reason field here (removed per request) - this
+               is staff directly rebooking an already-decided slot, not
+               asking the student why they need a new one, so the backend
+               call just sends an empty reason. -->
+          <div style="border-top:1px solid var(--cloud);margin-top:2px;padding-top:14px;display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:12.5px;font-weight:600;color:var(--moss)">Or Reschedule Now</div>
+            <div style="font-size:12px;color:var(--stone);line-height:1.5">Set the new date and time yourself - no action needed from the student.</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+              <input v-model="rescheduleNowForm.appointment_date" type="date" class="ifi" :min="todayStr" />
+              <input v-model="rescheduleNowForm.start_time" type="time" class="ifi" min="08:00" max="16:00" />
+              <input v-model="rescheduleNowForm.end_time" type="time" class="ifi" min="08:00" max="16:00" />
+            </div>
+            <div v-if="rescheduleNowWarningMsg" style="font-size:11px;color:var(--red)">{{ rescheduleNowWarningMsg }}</div>
+            <button
+              class="ibtn ibtn-p ibtn-sm"
+              style="justify-content:center"
+              :disabled="!rescheduleNowForm.appointment_date || !rescheduleNowForm.start_time || !rescheduleNowForm.end_time || reschedulingNow || !!rescheduleNowWarningMsg"
+              @click="submitRescheduleNow"
+            >
+              {{ reschedulingNow ? 'Rescheduling...' : 'Reschedule Now' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, watch, onMounted, onUnmounted, inject } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { appointmentAPI, userAPI } from '../../api/index';
+import { toTitleCase, formatTime12, blockSpecialKeypress } from '../../utils/validators';
+import { useAuthStore } from '../../stores/auth';
+import { officeHoursMessage } from '../../utils/blockedDates';
+import axios from 'axios';
+import RequiredDocumentsDownload from '../../components/RequiredDocumentsDownload.vue';
+
+const toast  = inject('toast');
+const auth   = useAuthStore();
+const router = useRouter();
+const route  = useRoute();
+const confirmAction = inject('confirmAction', null);
+
+// B241 - present only when this page was reached from a Student Information
+// File action (see the return_to query param those links now attach).
+const returnTo = computed(() => (typeof route.query.return_to === 'string' ? route.query.return_to : ''));
+
+// This used to be $router.push(returnTo), which PUSHES a brand new history
+// entry onto the stack instead of undoing the one that got here - so the
+// stack became [SIF, Calendar, SIF-again]. Pressing the browser's own Back
+// button afterward then stepped through that leftover middle entry (back to
+// Calendar first, then back to SIF again) instead of just leaving straight
+// away, which is the "back takes me to calendar then back to SIF" bug.
+// router.back() undoes the single forward navigation that got here (the
+// "Schedule Appointment" link push), so this button and the browser's own
+// Back button now agree. Falls back to push only if there's nowhere in the
+// SPA's own history to go back to (e.g. this page was opened directly via a
+// bookmarked/reloaded URL that happens to carry a return_to).
+function goBackToSif() {
+  if (window.history.state && window.history.state.back) {
+    router.back();
+  } else {
+    router.push(returnTo.value);
+  }
+}
+
+const loading    = ref(true);
+const appointments = ref([]);
+const allAppointments = ref([]);
+const pagination = ref({});
+// B282: this used to default to 'pending', hiding every other status
+// (confirmed, completed, etc.) until staff manually cleared the filter.
+// '' matches the "All" option below, so the calendar shows everything by
+// default.
+const filters = ref({ status: '', date: '', search: '' });
+
+// B628 (10/30/2026): debounced so each keystroke doesn't fire its own
+// request - mirrors the search pattern already used elsewhere (e.g.
+// students/Index.vue).
+let searchDebounce = null;
+function onSearchInput() {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => fetchAppointments(), 350);
+}
+
+const showRescheduleModal = ref(false);
+const rescheduleTarget    = ref(null);
+const rescheduleForm      = ref({ reschedule_reason: '' });
+
+const showCancelModal = ref(false);
+const cancelTarget    = ref(null);
+const cancelForm      = ref({ cancellation_reason: '' });
+
+const detailTarget = ref(null);
+
+// Reset the inline panels whenever a different appointment is opened.
+watch(detailTarget, () => {
+  callSlipPrompt.value = false;
+  overrideForm.value = { target: '', reason: '' };
+  scheduleForm.value = { appointment_date: '', start_time: '', end_time: '' };
+});
+
+// ---- Send Call Slip (student has not picked a schedule yet) ----
+const callSlipPrompt = ref(false);
+const sendingCallSlip = ref(false);
+function canSendCallSlip(a) {
+  return !!a && a.status === 'pending' && a.request_status === 'awaiting_student' && !a.no_show_escalated;
+}
+async function sendCallSlip() {
+  if (!detailTarget.value || sendingCallSlip.value) return;
+  sendingCallSlip.value = true;
+  try {
+    const res = await appointmentAPI.sendCallSlipUnscheduled(detailTarget.value.id);
+    toast?.success(res.data.message || 'Call Slip sent.');
+    callSlipPrompt.value = false;
+    detailTarget.value = null;
+    fetchAppointments(pagination.value?.current_page || 1, true);
+    fetchAllAppointments();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to send the Call Slip.');
+  } finally {
+    sendingCallSlip.value = false;
+  }
+}
+
+// ---- Admin / GCU Staff: manual status override ----
+// (Historically labeled "GCU Head," but that role doesn't exist in this
+// system - the actual role is gcu_staff. Admin and GCU staff can both use
+// this panel on non-TMDU appointments.)
+const canOverride = computed(() => ['admin', 'gcu_staff'].includes(auth.user?.role));
+const overrideForm = ref({ target: '', reason: '' });
+const overridingStatus = ref(false);
+async function applyOverride() {
+  if (!detailTarget.value || overridingStatus.value) return;
+
+  // B#, 11/4/2026: overriding straight to a "handled" status (anything but
+  // back to awaiting_student) used to go through silently even when this
+  // appointment's case file never actually got a real appointment date -
+  // request_status is still awaiting_student, which means the
+  // appointment_date/start_time/end_time on this record are either empty
+  // or a stale leftover from before a reschedule request reopened it (see
+  // reopenForStudent() - those fields aren't cleared, they're just no
+  // longer current). A status override only changes the status column; it
+  // never sets a real date. Staff now get a heads-up before it goes
+  // through, so they're aware the student still needs an actual
+  // appointment either way.
+  if (detailTarget.value.request_status === 'awaiting_student' && overrideForm.value.target !== 'awaiting_student') {
+    const proceed = confirmAction
+      ? await confirmAction({
+          title: 'Student Has No Appointment Date Yet',
+          message: "This student's case file doesn't have a current appointment date - they're still waiting to pick (or be given) a schedule. Overriding the status here only changes the status; it does not set a date. The student still needs an actual appointment even after this override. Continue anyway?",
+          confirmText: 'Yes, Override Anyway',
+          cancelText: 'Never Mind',
+          danger: true,
+        })
+      : true;
+    if (!proceed) return;
+  }
+
+  overridingStatus.value = true;
+  try {
+    const res = await appointmentAPI.overrideStatus(detailTarget.value.id, {
+      target: overrideForm.value.target,
+      reason: overrideForm.value.reason.trim(),
+    });
+    toast?.success(res.data.message || 'Appointment status updated.');
+    detailTarget.value = null;
+    fetchAppointments(pagination.value?.current_page || 1, true);
+    fetchAllAppointments();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to update the status.');
+  } finally {
+    overridingStatus.value = false;
+  }
+}
+
+// ---- Admin / GCU Staff: schedule a date/time directly for the student ----
+const scheduleForm = ref({ appointment_date: '', start_time: '', end_time: '' });
+// Bug (10/30/2026): this "Schedule Now" input had no :min and no holiday/
+// suspension/weekend check - staff could pick a past date, a weekend, or a
+// blocked one, and the backend didn't reliably catch all of those either
+// (see the scheduleForStudent()/rescheduleNow() controller fixes).
+// todayStr/dateBlockedMsg() block all of this client-side too, same rules
+// the backend enforces (after_or_equal:today + Mon-Fri only).
+const todayStr = (() => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+})();
+// Shared by scheduleBlockedMsg (Schedule Now) and rescheduleNowBlockedMsg
+// (Reschedule Now) below - a plain <input type="date"> can't disable
+// specific weekdays on its own, so weekends are checked here in JS.
+function dateBlockedMsg(d) {
+  if (!d) return '';
+  // Parsed at local noon so the day-of-week doesn't shift back a day for a
+  // timezone behind UTC.
+  const day = new Date(`${d}T12:00:00`).getDay();
+  if (day === 0 || day === 6) {
+    return 'Appointments can only be scheduled Monday through Friday.';
+  }
+  return blockedMap.value[d] ? `This date is not available: ${blockedMap.value[d].label}.` : '';
+}
+// B628 (10/30/2026): office hours (8:00 AM - 4:00 PM) were only ever
+// enforced server-side (and only on scheduleForStudent()/rescheduleNow()) -
+// a plain <input type="time"> has no min/max either, so this is checked
+// here too, same as the date-side checks above.
+function dateOrTimeBlockedMsg(d, start, end) {
+  return dateBlockedMsg(d) || officeHoursMessage(start, end);
+}
+const scheduleBlockedMsg = computed(() => dateOrTimeBlockedMsg(scheduleForm.value.appointment_date, scheduleForm.value.start_time, scheduleForm.value.end_time));
+
+// ---- Live conflict checking (Schedule Now / Reschedule Now) ----
+// B#, 11/4/2026: before this, nothing checked whether a slot was actually
+// free until the Confirm/Reschedule Now button was clicked and the backend
+// rejected it with a 422 - staff had no way to know ahead of time. This
+// calls the same /appointments/check-conflict endpoint the student's own
+// self-booking already uses, with the exact same inputs the backend's
+// own unit-wide overlap check runs on (date + start_time + end_time),
+// excluding the appointment being scheduled/rescheduled itself so it
+// never conflicts with its own current slot.
+async function checkSlotConflict(unit, date, start, end, excludeId) {
+  if (!unit || !date || !start || !end) return '';
+  try {
+    const res = await appointmentAPI.checkConflict({
+      unit, appointment_date: date, start_time: start, end_time: end, exclude_id: excludeId,
+    });
+    if (res.data.blocked) return res.data.message || 'This date is not available.';
+    if (res.data.has_conflict) return 'This time slot conflicts with another appointment for this unit. Please pick another.';
+    return '';
+  } catch (e) {
+    return '';
+  }
+}
+
+let scheduleConflictDebounce = null;
+const scheduleConflictMsg = ref('');
+watch(() => [scheduleForm.value.appointment_date, scheduleForm.value.start_time, scheduleForm.value.end_time], () => {
+  scheduleConflictMsg.value = '';
+  clearTimeout(scheduleConflictDebounce);
+  if (!detailTarget.value || scheduleBlockedMsg.value) return;
+  scheduleConflictDebounce = setTimeout(async () => {
+    scheduleConflictMsg.value = await checkSlotConflict(
+      detailTarget.value.unit, scheduleForm.value.appointment_date, scheduleForm.value.start_time, scheduleForm.value.end_time, detailTarget.value.id
+    );
+  }, 350);
+});
+const scheduleWarningMsg = computed(() => scheduleBlockedMsg.value || scheduleConflictMsg.value);
+
+const schedulingStudent = ref(false);
+async function applyScheduleStudent() {
+  if (!detailTarget.value || schedulingStudent.value) return;
+  schedulingStudent.value = true;
+  try {
+    const res = await appointmentAPI.scheduleForStudent(detailTarget.value.id, {
+      appointment_date: scheduleForm.value.appointment_date,
+      start_time: scheduleForm.value.start_time,
+      end_time: scheduleForm.value.end_time,
+    });
+    toast?.success(res.data.message || 'Appointment scheduled for the student.');
+    detailTarget.value = null;
+    fetchAppointments(pagination.value?.current_page || 1, true);
+    fetchAllAppointments();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to schedule the appointment.');
+  } finally {
+    schedulingStudent.value = false;
+  }
+}
+
+function openApptDetail(a) {
+  detailTarget.value = a;
+  overrideOpen.value = false;
+  overrideForm.value = { target: '', reason: '' };
+  scheduleForm.value = { appointment_date: '', start_time: '', end_time: '' };
+}
+
+// 24h "HH:MM(:SS)" -> "h:mm AM/PM"
+function fmt12(t) {
+  if (!t) return '';
+  const [h, m] = String(t).split(':');
+  const hh = Number(h);
+  if (Number.isNaN(hh)) return t;
+  return `${((hh + 11) % 12) + 1}:${(m || '00').slice(0, 2)} ${hh >= 12 ? 'PM' : 'AM'}`;
+}
+
+// Label for an appointment a Call Slip was sent for (to the Dean's Secretary),
+// worded by how far the follow-up has got. Empty when there is none.
+const CALL_SLIP_LABELS = {
+  pending:     'Call Slip Sent',
+  contacted:   'Call Slip · Student Contacted',
+  rescheduled: 'Call Slip · Rescheduled',
+  dept_chair:  'Call Slip · With Dept. Chair',
+};
+function callSlipLabel(a) {
+  if (!a || !(a.no_show_escalated || a.call_slip_stage)) return '';
+  return CALL_SLIP_LABELS[a.call_slip_stage] || 'Call Slip Sent';
+}
+function callSlipTitle(a) {
+  const when = a?.no_show_escalated_at ? new Date(a.no_show_escalated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  return `A Call Slip was sent to the College Dean${when ? ' on ' + when : ''}.`;
+}
+
+// The status override is folded away each time a different appointment is opened.
+const overrideOpen = ref(false);
+
+function formatApptDate(date) {
+  return date ? new Date(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '-';
+}
+
+const showConfirmModal   = ref(false);
+const confirmTarget      = ref(null);
+const confirmStaffId     = ref('');
+const confirmRequiredDocuments = ref('');
+const staffList          = ref([]);
+const staffAvailability  = ref(null);
+const loadingAvailability = ref(false);
+
+const today        = new Date();
+const currentMonth = ref(today.getMonth());
+const currentYear  = ref(today.getFullYear());
+const selectedDate = ref(today);
+
+const previewDate = ref(null);
+
+const previewDateLabel = computed(() => {
+  if (!previewDate.value) return '';
+  return new Date(previewDate.value + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+});
+
+function selectDayPreview(day) {
+  if (day.isOther || !day.dateStr) return;
+  selectedDate.value = new Date(day.dateStr);
+  previewDate.value = day.dateStr;
+  filters.value.date = day.dateStr;
+  delete filters.value.active;
+  fetchAppointments();
+}
+
+function clearDateFilter() {
+  previewDate.value = null;
+  filters.value.date = '';
+  delete filters.value.active;
+  fetchAppointments();
+}
+
+function roleLabel(role) {
+  const labels = { admin: 'Admin / GCU Head', gcu_staff: 'GCU Staff', sdu_head: 'SDU Head', tmdu_head: 'TMDU Head', tmdu_staff: 'TMDU Staff' };
+  return labels[role] || role;
+}
+
+async function fetchStaff() {
+  try {
+    const res = await userAPI.index({ is_active: 1 });
+    staffList.value = (res.data.data || []).filter(u =>
+  ['admin', 'gcu_staff'].includes(u.role)
+  );
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function fetchAllAppointments() {
+  try {
+    const res = await appointmentAPI.index({ per_page: 1000 });
+    allAppointments.value = res.data.data;
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function goToReferral(a) {
+  const studentId = a.student_id || a.student?.id;
+  if (studentId) {
+    router.push({ name: 'student-show', params: { id: studentId }, query: { ctx: 'cases' } });
+  } else {
+    toast?.error('No linked student found for this appointment.');
+  }
+}
+
+async function fetchAppointments(page = 1, silent = false) {
+  if (!silent) loading.value = true;
+  try {
+    const res = await appointmentAPI.index({ ...filters.value, page });
+    appointments.value = res.data.data;
+    pagination.value   = res.data;
+  } catch (e) {
+    console.error(e);
+  } finally {
+    loading.value = false;
+  }
+}
+
+function openConfirm(a) {
+  confirmTarget.value = a;
+  confirmStaffId.value = '';
+  confirmRequiredDocuments.value = '';
+  staffAvailability.value = null;
+  showConfirmModal.value = true;
+}
+
+function isOverlapping(slot) {
+  if (!confirmTarget.value) return false;
+  return slot.start_time < confirmTarget.value.end_time && slot.end_time > confirmTarget.value.start_time;
+}
+
+const confirmReferral = computed(() =>
+  confirmTarget.value?.referral || confirmTarget.value?.case?.latest_referral || null
+);
+
+watch(confirmStaffId, async (staffId) => {
+  staffAvailability.value = null;
+  if (!staffId || !confirmTarget.value) return;
+  loadingAvailability.value = true;
+  try {
+    const date = confirmTarget.value.appointment_date?.split('T')[0];
+    const res = await appointmentAPI.availability({ user_id: staffId, date });
+    staffAvailability.value = res.data;
+  } catch (e) {
+    console.error(e);
+  } finally {
+    loadingAvailability.value = false;
+  }
+});
+
+async function submitConfirm() {
+  try {
+    await appointmentAPI.confirm(confirmTarget.value.id, {
+      staff_user_id:       confirmStaffId.value || null,
+      required_documents:  confirmRequiredDocuments.value || null,
+    });
+    confirmTarget.value.status = 'confirmed';
+    confirmTarget.value.request_status = 'confirmed';
+    toast?.success('Appointment confirmed. Student will be notified.');
+    showConfirmModal.value = false;
+    fetchAppointments();
+    fetchAllAppointments();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to confirm appointment.');
+  }
+}
+
+async function checkIn(a) {
+  const ok = await confirmAction?.({
+    title: 'Mark as Attended?',
+    message: `Mark ${a.student?.last_name}, ${a.student?.first_name}'s appointment as attended? This cannot be undone.`,
+    confirmText: 'Yes, Mark Attended',
+  });
+  if (confirmAction && !ok) return;
+
+  try {
+    const res = await appointmentAPI.checkIn(a.id);
+    a.status = res.data?.status || 'completed';
+    a.checked_in = true;
+    toast?.success('Student marked as attended.');
+    // Close the detail modal only on success — not on cancel
+    if (detailTarget.value?.id === a.id) detailTarget.value = null;
+    fetchAppointments();
+    fetchAllAppointments();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to check in.');
+  }
+}
+
+const showNoShowModal   = ref(false);
+const noShowTarget      = ref(null);
+const submittingNoShow  = ref(false);
+
+const callSlipConfirming = ref(false);
+
+function openNoShow(a) {
+  noShowTarget.value = a;
+  callSlipConfirming.value = false;
+  showNoShowModal.value = true;
+}
+
+async function submitNoShow(action) {
+  if (!noShowTarget.value || submittingNoShow.value) return;
+  if (action === 'call_slip' && noShowTarget.value.no_show_escalated) return;
+
+  // Call Slip already has its own inline confirmation (callSlipConfirming);
+  // the reschedule path is the only one that fires straight from the modal.
+  if (action === 'reschedule') {
+    const ok = await confirmAction?.({
+      title: 'Mark as No-Show?',
+      message: `Mark ${noShowTarget.value.student?.last_name}, ${noShowTarget.value.student?.first_name}'s appointment as a no-show and ask them to reschedule?`,
+      confirmText: 'Yes, Mark No-Show',
+    });
+    if (confirmAction && !ok) return;
+  }
+
+  submittingNoShow.value = true;
+  try {
+    const res = await appointmentAPI.escalateNoShow(noShowTarget.value.id, action);
+    noShowTarget.value.status = 'no_show';
+    noShowTarget.value.no_show_escalated = !!res.data.appointment?.no_show_escalated;
+    toast?.success(res.data.message || 'Marked as no-show.');
+    showNoShowModal.value = false;
+    fetchAllAppointments();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to mark as no-show.');
+    callSlipConfirming.value = false;
+  } finally {
+    submittingNoShow.value = false;
+  }
+}
+
+function openCancel(a) {
+  cancelTarget.value = a;
+  cancelForm.value = { cancellation_reason: '' };
+  showCancelModal.value = true;
+}
+
+async function submitCancel() {
+  if (!cancelForm.value.cancellation_reason) {
+    toast?.error('Please provide a reason for the cancellation.');
+    return;
+  }
+  const ok = await confirmAction?.({
+    title: 'Cancel Appointment?',
+    message: `Cancel ${cancelTarget.value.student?.last_name}, ${cancelTarget.value.student?.first_name}'s appointment? The student will be notified. This cannot be undone.`,
+    confirmText: 'Yes, Cancel',
+  });
+  if (confirmAction && !ok) return;
+
+  try {
+    await appointmentAPI.cancel(cancelTarget.value.id, cancelForm.value);
+    cancelTarget.value.status = 'cancelled';
+    showCancelModal.value = false;
+    toast?.success('Appointment cancelled.');
+    fetchAllAppointments();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to cancel appointment.');
+  }
+}
+
+function openReschedule(a) {
+  rescheduleTarget.value = a;
+  rescheduleForm.value = { reschedule_reason: '' };
+  rescheduleNowForm.value = { appointment_date: '', start_time: '', end_time: '' };
+  showRescheduleModal.value = true;
+}
+
+async function submitReschedule() {
+  if (!rescheduleForm.value.reschedule_reason) {
+    toast?.error('Please provide a reason for the reschedule.');
+    return;
+  }
+  try {
+    await appointmentAPI.reschedule(rescheduleTarget.value.id, rescheduleForm.value);
+    toast?.success('Reschedule request sent to student.');
+    showRescheduleModal.value = false;
+    fetchAppointments();
+    fetchAllAppointments();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to send reschedule request.');
+  }
+}
+
+// B628 (10/30/2026, revised): "Reschedule Now" state for the picker added
+// to the Reschedule modal above - no reason field (removed per request), so
+// an empty reschedule_reason is just sent as '' (the backend already treats
+// it as optional). Books the new slot directly instead of sending the
+// student a link.
+const rescheduleNowForm = ref({ appointment_date: '', start_time: '', end_time: '' });
+const reschedulingNow = ref(false);
+const rescheduleNowBlockedMsg = computed(() => dateOrTimeBlockedMsg(rescheduleNowForm.value.appointment_date, rescheduleNowForm.value.start_time, rescheduleNowForm.value.end_time));
+
+// B#, 11/4/2026: same live conflict check as Schedule Now above.
+let rescheduleConflictDebounce = null;
+const rescheduleNowConflictMsg = ref('');
+watch(() => [rescheduleNowForm.value.appointment_date, rescheduleNowForm.value.start_time, rescheduleNowForm.value.end_time], () => {
+  rescheduleNowConflictMsg.value = '';
+  clearTimeout(rescheduleConflictDebounce);
+  if (!rescheduleTarget.value || rescheduleNowBlockedMsg.value) return;
+  rescheduleConflictDebounce = setTimeout(async () => {
+    rescheduleNowConflictMsg.value = await checkSlotConflict(
+      rescheduleTarget.value.unit, rescheduleNowForm.value.appointment_date, rescheduleNowForm.value.start_time, rescheduleNowForm.value.end_time, rescheduleTarget.value.id
+    );
+  }, 350);
+});
+const rescheduleNowWarningMsg = computed(() => rescheduleNowBlockedMsg.value || rescheduleNowConflictMsg.value);
+
+async function submitRescheduleNow() {
+  reschedulingNow.value = true;
+  try {
+    await appointmentAPI.rescheduleNow(rescheduleTarget.value.id, {
+      reschedule_reason: '',
+      appointment_date: rescheduleNowForm.value.appointment_date,
+      start_time: rescheduleNowForm.value.start_time,
+      end_time: rescheduleNowForm.value.end_time,
+    });
+    toast?.success('Appointment rescheduled.');
+    showRescheduleModal.value = false;
+    fetchAppointments();
+    fetchAllAppointments();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Failed to reschedule appointment.');
+  } finally {
+    reschedulingNow.value = false;
+  }
+}
+
+function changePage(page) { fetchAppointments(page); }
+
+function resetFilters() {
+  filters.value = { status: '', date: '', search: '' };
+  previewDate.value = null;
+  fetchAppointments();
+}
+
+const currentMonthLabel = computed(() => {
+  return new Date(currentYear.value, currentMonth.value).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+});
+
+// Holidays, class suspensions and other School Calendar events (B486).
+const blockedMap = ref({});
+async function fetchBlockedDates() {
+  const d = new Date();
+  const iso = (x) => x.toISOString().slice(0, 10);
+  const from = new Date(d.getFullYear() - 1, 0, 1), to = new Date(d.getFullYear() + 2, 0, 1);
+  try {
+    const base = `${import.meta.env.VITE_API_URL || ''}/api`;
+    const res = await axios.get(`${base}/calendar/blocked-dates`, {
+      params: { from: iso(from), to: iso(to) },
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    });
+    blockedMap.value = res.data?.blocked || {};
+  } catch (e) { blockedMap.value = {}; }
+}
+
+// B548: default the calendar's view to the active academic year, not just
+// "today" - today only lands somewhere sensible while it still falls inside
+// the Current term. Right after an admin marks a new term Current (or when
+// looking at a term whose dates don't include today), open on that term's
+// first month instead of leaving the calendar pinned to a stale year. Skipped
+// when arriving with an explicit ?date= (the Dashboard's "Appointments Today"
+// card already picked the month that matters).
+async function alignCalendarToAcademicYear() {
+  const qd = typeof route.query.date === 'string' ? route.query.date : '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(qd)) return;
+  try {
+    const base = `${import.meta.env.VITE_API_URL || ''}/api`;
+    const res = await axios.get(`${base}/management/academic-years`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    });
+    const current = (res.data || []).find(a => a.is_current);
+    if (!current || !current.year_start || !current.year_end) return;
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const inRange = todayStr >= String(current.year_start).slice(0, 10) && todayStr <= String(current.year_end).slice(0, 10);
+    if (inRange) return;
+    const start = new Date(String(current.year_start).slice(0, 10) + 'T00:00:00');
+    currentMonth.value = start.getMonth();
+    currentYear.value = start.getFullYear();
+  } catch (e) { /* non-critical: the calendar just keeps defaulting to today */ }
+}
+// What kind of School Calendar entry it is (the calendar stores holiday / suspension types).
+function blockedTypeLabel(t) {
+  const m = { holiday: 'Holiday', regular_holiday: 'Holiday', special_holiday: 'Holiday', suspension: 'Class suspension', class_suspension: 'Class suspension', office_closure: 'Office closure', closure: 'Office closure' };
+  return m[String(t)] || String(t).replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+}
+const blockedForPreview = computed(() => (previewDate.value ? blockedMap.value[previewDate.value] || null : null));
+const blockedThisMonth = computed(() => {
+  const prefix = `${currentYear.value}-${String(currentMonth.value + 1).padStart(2, '0')}-`;
+  return Object.entries(blockedMap.value)
+    .filter(([k]) => k.startsWith(prefix))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => ({ date: k, day: new Date(k + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), label: v.label }));
+});
+
+const calendarDays = computed(() => {
+  const days = [];
+  const firstDay    = new Date(currentYear.value, currentMonth.value, 1).getDay();
+  const daysInMonth = new Date(currentYear.value, currentMonth.value + 1, 0).getDate();
+  const daysInPrev  = new Date(currentYear.value, currentMonth.value, 0).getDate();
+
+  for (let i = firstDay - 1; i >= 0; i--) {
+    days.push({ date: daysInPrev - i, isOther: true, key: `prev-${i}`, hasAppt: false, apptCount: 0, apptTitle: '' });
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr    = `${currentYear.value}-${String(currentMonth.value + 1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isToday    = d === today.getDate() && currentMonth.value === today.getMonth() && currentYear.value === today.getFullYear();
+    const isSelected = d === selectedDate.value.getDate() && currentMonth.value === selectedDate.value.getMonth() && currentYear.value === selectedDate.value.getFullYear();
+    const dayAppts   = allAppointments.value.filter(a => a.appointment_date?.split('T')[0] === dateStr && ['pending', 'confirmed'].includes(a.status));
+    const apptTitle  = dayAppts.map(a => `${a.start_time} - ${a.student?.student_id || ''}`).join('\n');
+    days.push({ date: d, isToday, isSelected, isOther: false, key: `cur-${d}`, hasAppt: dayAppts.length > 0, apptCount: dayAppts.length, apptTitle, dateStr, blocked: blockedMap.value[dateStr] || null });
+  }
+  const remaining = 42 - days.length;
+  for (let i = 1; i <= remaining; i++) {
+    days.push({ date: i, isOther: true, key: `next-${i}`, hasAppt: false, apptCount: 0, apptTitle: '' });
+  }
+  return days;
+});
+
+function prevMonth() {
+  if (currentMonth.value === 0) { currentMonth.value = 11; currentYear.value--; }
+  else currentMonth.value--;
+}
+
+function nextMonth() {
+  if (currentMonth.value === 11) { currentMonth.value = 0; currentYear.value++; }
+  else currentMonth.value++;
+}
+
+function getMonth(date) { return new Date(date).toLocaleDateString('en-US', { month: 'short' }); }
+function getDay(date)   { return new Date(date).getDate(); }
+
+// A student-picked schedule is still "pending" until staff confirm it; say so
+// instead of showing a bare "Pending" (B292).
+//
+// Bug (11/3/2026): once the student's 7-day scheduling_token window lapses,
+// this still read "Awaiting Student" with no indication the student's own
+// link no longer works - staff had no visible signal to know a manual
+// "Schedule Now" override (still allowed past expiry) was actually needed.
+// Same token_expires_at check as the student-side pages.
+function isApptExpired(a) {
+  return a.status === 'pending' && a.request_status === 'awaiting_student' &&
+    !!a.token_expires_at && new Date(a.token_expires_at) < new Date();
+}
+function apptBadgeClass(a) {
+  return isApptExpired(a) ? 'ibadge-expired' : 'ibadge-' + a.status;
+}
+function statusText(a) {
+  if (isApptExpired(a)) return 'Expired';
+  if (a.status === 'pending' && a.request_status === 'pending_confirmation') return 'Awaiting Confirmation';
+  if (a.status === 'pending' && a.request_status === 'awaiting_student') return 'Awaiting Student';
+  return toTitleCase(a.status);
+}
+
+let refreshTimer = null;
+onMounted(() => {
+  // Arriving from the Dashboard's "Appointments Today" card: show exactly the appointments it counted.
+  const qd = typeof route.query.date === 'string' ? route.query.date : '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(qd)) {
+    filters.value.date = qd;
+    previewDate.value = qd;
+    selectedDate.value = new Date(qd + 'T00:00:00');
+    currentMonth.value = selectedDate.value.getMonth();
+    currentYear.value = selectedDate.value.getFullYear();
+    if (route.query.active === '1') filters.value.active = 1;
+  }
+  fetchAppointments();
+  fetchAllAppointments();
+  fetchBlockedDates();
+  alignCalendarToAcademicYear();
+  fetchStaff();
+  // Pick up schedules students set or change without a manual refresh.
+  refreshTimer = setInterval(() => {
+    if (document.hidden || showConfirmModal.value) return;
+    fetchAppointments(pagination.value?.current_page || 1, true);
+    fetchAllAppointments();
+  }, 30000);
+});
+onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer); });
+</script>
+
+<style scoped>
+/* Appointment Details popup */
+.ad-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; }
+.ad-label { font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--fog); margin-bottom: 3px; }
+.ad-value { font-size: 13px; color: var(--ink); }
+.ad-notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 18px; background: var(--snow); border-radius: var(--r-sm); padding: 10px 12px; }
+.ad-override { border: 1px dashed var(--silver); border-radius: var(--r-sm); padding: 10px 12px; }
+.ad-override-row { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr) auto; gap: 8px; align-items: center; }
+.ad-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 22px; border-top: 1px solid var(--cloud); background: var(--snow); }
+@media (max-width: 860px) {
+  /* Phones: the calendar comes first, and each row's buttons sit under its text instead of squeezing it. */
+  .appt-cal { order: -1; }
+  .appt-cal [title] { aspect-ratio: auto !important; height: 40px; }
+  .appt-row { flex-wrap: wrap; }
+  .appt-actions { flex: 1 1 100%; max-width: none !important; justify-content: flex-start !important; padding-left: 60px; }
+  .appt-actions:empty { display: none; }
+  .ad-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ad-override-row { grid-template-columns: 1fr; }
+  .ad-foot > div { margin-left: 0 !important; width: 100%; }
+  .ad-foot .ibtn { flex: 1 1 auto; justify-content: center; }
+}
+</style>

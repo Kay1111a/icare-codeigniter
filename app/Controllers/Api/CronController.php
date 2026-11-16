@@ -1,0 +1,98 @@
+<?php
+
+namespace App\Controllers\Api;
+
+use App\Controllers\BaseController;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
+
+class CronController extends BaseController
+{
+    // Fails CLOSED: if CRON_SECRET isn't configured, nobody gets in (previously a
+    // missing secret meant null === null and the endpoint was open to everyone).
+    private function secretOk(Request $request): bool
+    {
+        $secret = (string) config('app.cron_secret');
+        $given  = (string) $request->header('X-Cron-Secret');
+
+        return $secret !== '' && hash_equals($secret, $given);
+    }
+
+    public function followUpReminders(Request $request)
+    {
+        if (!$this->secretOk($request)) {
+            abort(403, 'Unauthorized.');
+        }
+
+        Artisan::call('reminders:follow-up');
+
+        return response()->json([
+            'message' => 'Follow-up reminders executed.',
+            'output'  => Artisan::output(),
+        ]);
+    }
+
+    // The daily scheduled backup of data and configuration. Laravel's own
+    // scheduler has nothing to start it on the hosting service, so the same
+    // outside timer that calls the two jobs above calls this once a day.
+    public function backup(Request $request)
+    {
+        if (!$this->secretOk($request)) {
+            abort(403, 'Unauthorized.');
+        }
+
+        Artisan::call('backup:run', ['--type' => 'all', '--trigger' => 'scheduled']);
+
+        return response()->json([
+            'message' => 'Scheduled backup executed.',
+            'output'  => Artisan::output(),
+        ]);
+    }
+
+    // Hourly: reminds students of confirmed appointments tomorrow and in the next few hours.
+    public function appointmentReminders(Request $request)
+    {
+        if (!$this->secretOk($request)) {
+            abort(403, 'Unauthorized.');
+        }
+
+        Artisan::call('reminders:appointments');
+
+        return response()->json([
+            'message' => 'Appointment reminders executed.',
+            'output'  => Artisan::output(),
+        ]);
+    }
+
+    public function detectNoShows(Request $request)
+{
+    if (!$this->secretOk($request)) {
+        abort(403, 'Unauthorized.');
+    }
+
+    Artisan::call('app:detect-missed-appointments');
+
+    return response()->json([
+        'message' => 'No-show detection executed.',
+        'output'  => Artisan::output(),
+    ]);
+}
+
+    // Retries emails LoggedMailChannel couldn't send. emails:retry-failed was
+    // already scheduled in Kernel.php, but Render's free tier has no process
+    // to run `schedule:run`, so - like the jobs above - it needs its own
+    // outside-timer-triggered endpoint or failed emails are never retried.
+    public function retryFailedEmails(Request $request)
+    {
+        if (!$this->secretOk($request)) {
+            abort(403, 'Unauthorized.');
+        }
+
+        Artisan::call('emails:retry-failed');
+
+        return response()->json([
+            'message' => 'Failed-email retry executed.',
+            'output'  => Artisan::output(),
+        ]);
+    }
+}

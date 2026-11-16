@@ -1,0 +1,164 @@
+<template>
+  <div class="fade-up">
+    <div class="ph" style="margin-bottom:20px">
+      <h1>TMDU Testing Results</h1>
+      <p>The Refer to TMDU forms GCU has sent, with their status and released results (PAR).</p>
+    </div>
+
+    <div class="icard">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--cloud);display:flex;gap:10px;flex-wrap:wrap">
+        <input v-model="search" class="ifi" style="max-width:260px" maxlength="100" placeholder="Search student name or ID..." @input="onSearch" />
+        <select v-model="status" class="fsm" @change="fetchItems">
+          <option value="">All Status</option>
+          <option value="pending">Pending</option>
+          <option value="scheduled">Scheduled for Testing</option>
+          <option value="test_administered">Test Administered</option>
+          <option value="awaiting_results">Awaiting Results</option>
+          <option value="test_results_issued">Results Released</option>
+        </select>
+        <button class="ibtn ibtn-o ibtn-sm" @click="resetFilters">Reset</button>
+      </div>
+
+      <div v-if="loading" style="text-align:center;padding:44px">
+        <div style="width:24px;height:24px;border:2px solid var(--mint);border-top-color:var(--moss);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto"></div>
+      </div>
+      <div v-else-if="!items.length" class="empty-state">
+        <h3>No case referrals yet</h3>
+        <p>Referrals sent to TMDU from a Student Information File will appear here.</p>
+      </div>
+      <div v-else class="ts">
+        <table class="itable">
+          <thead>
+            <tr>
+              <th style="width:28px"></th>
+              <th>Student ID</th>
+              <th>Name</th>
+              <th>Case Referrals</th>
+              <th>Latest</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="g in groups" :key="g.key">
+              <tr style="cursor:pointer" @click="toggle(g.key)">
+                <td style="color:var(--stone)">{{ isOpen(g.key) ? '▾' : '▸' }}</td>
+                <td style="font-family:var(--mono);font-size:12px">{{ g.student?.student_id }}</td>
+                <td style="font-weight:600">{{ g.student?.last_name }}, {{ g.student?.first_name }}</td>
+                <td><span class="ibadge" style="background:var(--mist);color:var(--moss)">{{ g.items.length }}</span></td>
+                <td style="font-size:12px">{{ formatDate(g.items[0].created_at) }}</td>
+              </tr>
+              <tr v-for="r in (isOpen(g.key) ? g.items : [])" :key="r.id" style="cursor:pointer;background:var(--snow)" @click="selected = r">
+                <!-- On phones these rows are labelled as a referral, not as the student row above. -->
+                <td data-cell-label=""></td>
+                <td data-cell-label="Referral ID" style="font-family:var(--mono);font-size:11.5px;color:var(--stone)">{{ r.referral_code }}</td>
+                <td data-cell-label="Status" style="font-size:12px"><span class="ibadge" :class="badge(r).cls">{{ badge(r).label }}</span></td>
+                <td data-cell-label="Date Referred" style="font-size:12px">{{ formatDate(r.created_at) }}</td>
+                <td data-cell-label=""><button class="ibtn ibtn-o ibtn-sm" @click.stop="selected = r">View</button></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div v-if="pagination.last_page > 1" style="padding:12px 18px;border-top:1px solid var(--cloud);display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:12px;color:var(--stone)">
+          Showing {{ pagination.from }}-{{ pagination.to }} of {{ pagination.total }}
+        </span>
+        <div style="display:flex;gap:8px">
+          <button class="ibtn ibtn-o ibtn-sm" :disabled="pagination.current_page === 1" @click="fetchItems(false, pagination.current_page - 1)">Prev</button>
+          <button class="ibtn ibtn-o ibtn-sm" :disabled="pagination.current_page === pagination.last_page" @click="fetchItems(false, pagination.current_page + 1)">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating modal: the filled-out, uneditable form -->
+    <div v-if="selected" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="selected = null">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:560px;max-height:90vh;overflow-y:auto;box-shadow:var(--sh-lg)">
+        <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1">
+          <div style="font-size:15px;font-weight:600;color:var(--ink)">Referral for Psychological Testing</div>
+        </div>
+        <CaseReferralView :data="selected" />
+        <div style="padding:0 22px 22px;display:flex;justify-content:flex-end;gap:8px">
+          <button class="ibtn ibtn-p" @click="$router.push({ name: 'case-referral-show', params: { id: selected.id } })">View Case Referral</button>
+          <button class="ibtn ibtn-o" @click="selected = null">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted } from 'vue';
+import { caseReferralAPI } from '../../api/index';
+import CaseReferralView from '../../components/CaseReferralView.vue';
+import { useAutoRefresh } from '../../utils/useAutoRefresh';
+
+const items = ref([]);
+const loading = ref(true);
+const search = ref('');
+const status = ref('');
+const selected = ref(null);
+const pagination = ref({});
+
+// The list is grouped by student: one row per student, expandable to that
+// student's case referrals (newest first).
+const openKeys = ref({});
+function isOpen(key) { return !!openKeys.value[key]; }
+function toggle(key) { openKeys.value = { ...openKeys.value, [key]: !openKeys.value[key] }; }
+const groups = computed(() => {
+  const map = new Map();
+  for (const r of items.value) {
+    const key = r.student?.id ?? `none-${r.id}`;
+    if (!map.has(key)) map.set(key, { key, student: r.student, items: [] });
+    map.get(key).items.push(r);
+  }
+  const list = [...map.values()];
+  list.forEach(g => g.items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
+  list.sort((a, b) => new Date(b.items[0].created_at) - new Date(a.items[0].created_at));
+  return list;
+});
+
+const BADGES = {
+  pending:             { label: 'Pending', cls: 'ibadge-pending' },
+  scheduled:           { label: 'Scheduled for Testing', cls: 'ibadge-scheduled' },
+  in_progress:         { label: 'Scheduled for Testing', cls: 'ibadge-scheduled' },
+  test_administered:   { label: 'Test Administered', cls: 'ibadge-completed' },
+  awaiting_results:    { label: 'Awaiting Results', cls: 'ibadge-scheduled' },
+  test_results_issued: { label: 'Results Released', cls: 'ibadge-closed' },
+};
+function badge(r) {
+  const st = r.testing_record?.status;
+  if (!st || (st === 'pending' && !r.acknowledged_at)) return { label: 'Sent to TMDU', cls: 'ibadge-submitted' };
+  return BADGES[st] || { label: st, cls: 'ibadge-pending' };
+}
+
+function formatDate(d) { return d ? new Date(d).toLocaleDateString() : '-'; }
+
+let timer = null;
+function onSearch() {
+  clearTimeout(timer);
+  timer = setTimeout(fetchItems, 350);
+}
+
+function resetFilters() {
+  search.value = '';
+  status.value = '';
+  fetchItems();
+}
+
+async function fetchItems(silent = false, page = 1) {
+  if (!silent) loading.value = true;
+  try {
+    const res = await caseReferralAPI.index({ search: search.value || undefined, status: status.value || undefined, per_page: 10, page });
+    items.value = res.data.data || res.data;
+    pagination.value = res.data;
+  } catch (e) {
+    if (!silent) console.error(e);
+  } finally {
+    if (!silent) loading.value = false;
+  }
+}
+
+onMounted(() => fetchItems());
+// Keeps the list current without a manual reload. Stays on whatever page is
+// currently open instead of silently jumping back to page 1.
+useAutoRefresh(() => fetchItems(true, pagination.value?.current_page || 1), 25000);
+</script>

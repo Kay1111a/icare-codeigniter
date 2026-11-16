@@ -1,0 +1,436 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+class Referral extends Model
+{
+    use HasFactory, SoftDeletes;
+
+    protected $fillable = [
+        'referral_code',
+        'student_id',
+        'year_level',
+        'case_id',
+        'complaint_id',
+        'referred_by_user_id',
+        'referred_by_student_id',
+        'referrer_name',
+        'referrer_role',
+        'referrer_source',
+        'referrer_college',
+        'referral_type',
+        'nature_of_concern',
+        'urgency_level',
+        'is_self_referred',
+        'is_archived',
+        'assigned_to_user_id',
+        'assigned_at',
+        'status',
+        'acknowledged_at',
+        'acknowledged_by_user_id',
+        'void_requested_at',
+        'void_reason',
+        'violation_type',
+        'incident_description',
+        'incident_date',
+        'sanction',
+        'sanction_notes',
+        'has_attachments',
+        'intake_notes',
+        'feedback_notes',
+        'feedback_checklist',
+        'feedback_referred_other_text',
+        'feedback_others_text',
+        'feedback_ctrl_no',
+        'feedback_sent_at',
+        'feedback_sent_by_user_id',
+        'admission_date',
+        'admission_time_in',
+        'admission_time_out',
+        'admission_excused',
+        'admission_remarks',
+        'admission_details',
+        'admission_issued_at',
+        'admission_issued_by_user_id',
+    ];
+
+    protected $casts = [
+        'is_self_referred' => 'boolean',
+        'is_archived'      => 'boolean',
+        'has_attachments'  => 'boolean',
+        'assigned_at'      => 'datetime',
+        'acknowledged_at'  => 'datetime',
+        'void_requested_at' => 'datetime',
+        'incident_date'    => 'date',
+        'feedback_sent_at'  => 'datetime',
+        'feedback_checklist' => 'array',
+        'admission_date'    => 'date',
+        'admission_excused' => 'boolean',
+        'admission_details' => 'array',
+        'admission_issued_at' => 'datetime',
+    ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (Referral $referral) {
+            // Snapshot the student's year level as of this referral - every
+            // creation path (the staff form, complaints, self-referrals,
+            // outreach) goes through here, so filling it here once covers
+            // them all instead of each controller having to remember to.
+            if (!$referral->year_level && $referral->student_id) {
+                $referral->year_level = Student::where('id', $referral->student_id)->value('year_level');
+            }
+
+            // B#, 11/4/2026: this used to follow the Referral Slip's
+            // (QF-OSS-01) own Ctrl No. (e.g. "26-1-0069") when one was set
+            // up in Management, the same way a case's case_number follows
+            // the SIF's Ctrl No. - but that made referral codes and SIF
+            // Ctrl No.s land on the exact same "YY-T-####" shape, which read
+            // as the same number in lists like Sent Referrals. Always using
+            // the plain REF-{year}-#### scheme (previously only a fallback
+            // for when no Ctrl No. was configured) keeps referral codes
+            // visibly their own thing everywhere they're shown, for every
+            // role. Built in PHP rather than with CONCAT/SUBSTRING-AS-UNSIGNED
+            // SQL, which MySQL supports but the sqlite connection used in
+            // tests does not.
+            $prefix = 'REF-' . now()->year;
+
+            $lastNumber = static::withTrashed()
+                ->where('referral_code', 'like', "{$prefix}-%")
+                ->pluck('referral_code')
+                ->map(fn ($code) => (int) substr($code, -4))
+                ->max();
+
+            $nextNumber = ($lastNumber ?? 0) + 1;
+            $referral->referral_code = $prefix . '-' . str_pad($nextNumber, 4, '0', STR_PAD_LEFT);
+        });
+    }
+
+    // Relationships
+    public function student()        { return $this->belongsTo(Student::class); }
+    public function referredBy()     { return $this->belongsTo(User::class, 'referred_by_user_id'); }
+    public function assignedTo()     { return $this->belongsTo(User::class, 'assigned_to_user_id'); }
+    public function acknowledgedBy() { return $this->belongsTo(User::class, 'acknowledged_by_user_id'); }
+    public function case()           { return $this->belongsTo(CaseFile::class, 'case_id'); }
+    // The Complaint ("Incident Report") this referral was filed from, if any
+    // (ComplaintController::store() creates both together). Null for an
+    // ordinary disciplinary referral submitted directly, without a Complaint.
+    public function complaint()      { return $this->belongsTo(Complaint::class); }
+    public function documents()      { return $this->morphMany(Document::class, 'documentable'); }
+    public function sessionNotes()   { return $this->hasMany(SessionNote::class, 'referral_id')->orderBy('session_date'); }
+    public function appointments()   { return $this->hasMany(Appointment::class, 'referral_id')->orderBy('appointment_date'); }
+    public function feedbackSentBy() { return $this->belongsTo(User::class, 'feedback_sent_by_user_id'); }
+    public function admissionIssuedBy() { return $this->belongsTo(User::class, 'admission_issued_by_user_id'); }
+    // The TMDU testing workflow record this referral spawned (only present
+    // for referral_type = 'psychological_testing' referrals created via
+    // CaseController::referToTmdu()).
+    public function testingRecord()  { return $this->hasOne(TestingRecord::class); }
+
+    // Immutable history of every Feedback Slip (QF-OSS-01 companion
+    // document) sent for this referral - each send creates a new row
+    // rather than overwriting a single set of columns, mirroring how
+    // session notes are never overwritten either. Newest first.
+    public function feedbackSlips()
+    {
+        return $this->hasMany(FeedbackSlip::class)->latest('sent_at');
+    }
+
+    // Helpers
+    public function isUrgent(): bool  { return in_array($this->urgency_level, ['high', 'critical']); }
+    public function isPending(): bool { return $this->status === 'submitted'; }
+
+    // Gate for Case Action: sending a Feedback Slip, referring to TMDU, or
+    // completing this referral should only be possible once an appointment
+    // has actually happened for the case as a whole - "set" (any row
+    // exists) is not enough, the student has to have shown up (status
+    // 'completed', set by AppointmentController::checkIn()). Checked at the
+    // case level (CaseFile::hasAttendedAppointment()) since this is a gate
+    // on the SIF as a whole, not a single referral's own appointment list;
+    // falls back to this referral's own appointments if it has no case yet.
+    public function hasAttendedAppointment(): bool
+    {
+        // B301: linked by referral, not by case - an attended appointment
+        // for a different referral on the same case no longer unlocks this
+        // one. Older rows that predate referral linking (referral_id null)
+        // on the same case still count so existing SIFs are not locked.
+        return Appointment::where('status', 'completed')
+            ->where(function ($q) {
+                $q->where('referral_id', $this->id);
+                if ($this->case_id) {
+                    $q->orWhere(fn($w) => $w->whereNull('referral_id')->where('case_id', $this->case_id));
+                }
+            })
+            ->exists();
+    }
+
+    // Broader SIF edit gate: nothing on the referral's Student Information
+    // File - Previous Interventions, Session Notes, Follow-up Session,
+    // Admission Slip, Feedback Slip, or Case Action (Refer to TMDU/Resolve)
+    // - should be editable until the referral has actually been
+    // acknowledged (status moved past 'submitted') AND an appointment for
+    // the case has been attended. Mirrors referrals/Show.vue's canEditSif
+    // computed so the frontend gate and this backend gate can't drift.
+    // The person who sent a referral may correct it until GCU acknowledges it.
+    public function referrerCanEdit(): bool
+    {
+        return $this->status === 'submitted' && ! $this->acknowledged_at && ! $this->is_archived;
+    }
+
+    /**
+     * Referral types that stay with the same unit (GCU / SDU) as this one.
+     *
+     * Bug (11/5/2026): 'psychological_testing' had its own exclusive bucket
+     * here, as if picking it made this a TMDU-unit referral on its own -
+     * but it isn't. Per ReferralController::acknowledge()'s own comment,
+     * "Psychological Testing" picked here is just a Service Requested tag
+     * on an ordinary GCU referral (used SWS-wide for counting/filtering);
+     * it only becomes a real TMDU testing cycle once GCU explicitly refers
+     * the case to TMDU (CaseController::referToTmdu()), which creates its
+     * own separate sibling Referral with its own TestingRecord. So editing
+     * a GCU referral should be able to switch into/out of "Psychological
+     * Testing" exactly like any of the other 6 GCU service types - this
+     * excluded it, so GCU's own referral Create form offered it as a
+     * choice, but once submitted it could never be corrected to or from
+     * that type again. Only 'disciplinary' (SDU - Acts of Misconduct) is a
+     * genuinely different unit/workflow and stays its own exclusive bucket.
+     */
+    public function sameUnitTypes(): array
+    {
+        return match ($this->referral_type) {
+            'disciplinary' => ['disciplinary'],
+            default        => ['class_attendance', 'counseling', 'academic_deficiency', 'leave_of_absence', 'readmission', 'withdrawal', 'shifting', 'psychological_testing'],
+        };
+    }
+
+    /** Validate and apply a referrer's correction (only while it is still unacknowledged). */
+    public function applyReferrerEdit(\Illuminate\Http\Request $request): void
+    {
+        abort_unless($this->referrerCanEdit(), 422, 'This referral was already acknowledged, so it can no longer be edited.');
+
+        $rules = [
+            'referral_type'     => 'sometimes|required|in:' . implode(',', $this->sameUnitTypes()),
+            'nature_of_concern' => ['sometimes', 'required', 'string', 'min:10', 'max:1000', 'regex:' . \App\Support\PlainText::REQUIRES_LETTER_REGEX],
+        ];
+        if ($this->referral_type === 'disciplinary') {
+            $rules += [
+                'violation_type'       => 'sometimes|nullable|string|max:255',
+                'incident_description' => 'sometimes|nullable|string|max:2000',
+                'incident_date'        => 'sometimes|nullable|date',
+            ];
+        }
+        $old = $this->toArray();
+        $data = $request->validate($rules, [
+            'nature_of_concern.regex' => 'Please provide a valid referral reason. Numbers alone are not allowed.',
+        ]);
+        $this->update($data);
+        // A Case Referral Slip (to TMDU) keeps the same reason on its Testing Record.
+        if (isset($data['nature_of_concern']) && $this->testingRecord) {
+            $this->testingRecord->update(['reason' => $data['nature_of_concern']]);
+        }
+        \App\Models\AuditLog::record('updated', "Referrer edited referral {$this->referral_code} before acknowledgement.", $this, $old, $this->toArray());
+    }
+
+        public function canEditSif(): bool
+    {
+        // If the status was manually pushed forward via Override Status, trust it.
+        if (in_array($this->status, ['in_progress', 'completed', 'closed'])) {
+            return true;
+        }
+        return $this->status !== 'submitted' && $this->hasAttendedAppointment();
+    }
+
+    // A SIF whose referral is Resolved ('completed') or 'closed' is final -
+    // none of its contents (session notes, follow-ups, interventions,
+    // feedback/admission slips, parent conference, referral info) may be
+    // changed any more. Mirrors referrals/Show.vue's isResolved computed so
+    // the frontend lock and this backend lock can't drift; the frontend one
+    // is UX only, this is what actually refuses a direct API call.
+    // A referral created through "Refer to TMDU" (the Case Referral Slip)
+    // carries its own TestingRecord and belongs to TMDU alone - it is kept
+    // out of GCU's Referrals / SIF and TMDU's own queue is limited to these.
+    public function scopeTmduOwned($q)    { return $q->whereHas('testingRecord'); }
+    public function scopeNotTmduOwned($q) { return $q->whereDoesntHave('testingRecord'); }
+    public function isTmduOwned(): bool   { return $this->testingRecord()->exists(); }
+
+    // A Dean sees their college's referrals EXCEPT the ones other offices
+    // submitted (GCU, TMDU, SDU, admin). What stays visible is what the
+    // college itself sends - faculty, Dept Chairs, the Dean - and students'
+    // own self-referrals.
+    public const OTHER_STAFF_ROLES = ['admin', 'gcu_staff', 'tmdu_staff', 'tmdu_head', 'sdu_head', 'system_admin'];
+
+    public function scopeVisibleToDean($q, User $dean)
+    {
+        return $q
+            ->whereHas('student', fn ($s) => $s->whereIn('college', \App\Support\CollegeName::equivalents($dean->college)))
+            ->where(fn ($w) => $w->whereNull('referred_by_user_id')
+                ->orWhereDoesntHave('referredBy', fn ($u) => $u->whereIn('role', self::OTHER_STAFF_ROLES)));
+    }
+
+    public function isVisibleToDean(User $dean): bool
+    {
+        if (!in_array($this->student?->college, \App\Support\CollegeName::equivalents($dean->college), true)) {
+            return false;
+        }
+
+        return !in_array($this->referredBy?->role, self::OTHER_STAFF_ROLES, true);
+    }
+
+    // Moves active referrals out of the queue and into the archive (used when a
+    // student is deactivated or their case file is completed/closed). TMDU's own
+    // Case Referral Slips are left alone - they live in TMDU's queue.
+    //
+    // B#, 11/4/2026: used to update() each referral one at a time in the
+    // loop below (N separate UPDATE statements for N referrals) - now a
+    // single bulk UPDATE. The per-referral audit entries stay (each is a
+    // genuine, individually meaningful "this referral was archived"
+    // record, not display noise), but AuditLog::record() itself already
+    // defers its write until after the response is sent, so they no
+    // longer add to this call's own query count either way.
+    public static function archiveActive(array $where, string $why): int
+    {
+        $referrals = static::where($where)->where('is_archived', false)->notTmduOwned()->get(['id', 'referral_code']);
+        if ($referrals->isEmpty()) {
+            return 0;
+        }
+
+        static::whereIn('id', $referrals->pluck('id'))->update(['is_archived' => true]);
+
+        foreach ($referrals as $referral) {
+            AuditLog::record('archived', "Archived referral {$referral->referral_code}: {$why}.", $referral);
+        }
+
+        return $referrals->count();
+    }
+
+    // An archived referral is kept for the record only, so it is read-only too.
+    public function isLocked(): bool
+    {
+        return in_array($this->status, ['completed', 'closed'], true) || (bool) $this->is_archived;
+    }
+
+    public function abortIfLocked(): void
+    {
+        if ($this->is_archived) {
+            abort(422, 'This referral is archived and can no longer be edited.');
+        }
+        if ($this->isLocked()) {
+            abort(422, 'This Student Information File is closed and can no longer be edited.');
+        }
+    }
+
+    // B#, 11/4/2026: whoever sent a referral (staff or student) can ask to
+    // cancel it only once it's been acknowledged, and only up through
+    // 'scheduled'. A still-unacknowledged referral is cancelled directly
+    // instead (see referrerCanEdit() - delete, don't request), and once a
+    // unit has moved it to 'in_progress', resolved it, or branch-exited it
+    // (Referred TMDU/External), it's already being acted on, so
+    // cancellation is no longer an option from the sender's side - only
+    // staff can end it from there. Gated on acknowledged_at rather than
+    // status === 'acknowledged' because acknowledge() always sets both
+    // together in real use, but this stays correct even if a referral's
+    // status is later pushed forward by hand (Override Status) without
+    // touching acknowledged_at.
+    public function canRequestCancellation(): bool
+    {
+        if ($this->is_archived || $this->void_requested_at || !$this->acknowledged_at) {
+            return false;
+        }
+        return !in_array($this->status, ['in_progress', 'referred_tmdu', 'referred_external', 'completed', 'closed', 'cancelled'], true);
+    }
+
+    // The referral's main pipeline, in order. 'in_review' is retired (B275 -
+    // a referral used to jump straight to "In Review" on acknowledge, before
+    // any appointment even existed, which was confusing and redundant with
+    // "In Progress"). referred_tmdu/referred_external are branch exits, not
+    // on this line, so they're deliberately left out here.
+    private const STATUS_ORDER = ['submitted', 'acknowledged', 'scheduled', 'in_progress', 'completed', 'closed'];
+
+    /**
+     * Whether moving this referral's status to $status is a legal forward
+     * move. A status cannot go backward once set. Branch destinations
+     * (referred_tmdu, referred_external) aren't on the linear path above -
+     * they're allowed as long as the referral hasn't already reached a
+     * terminal state (completed/closed) or another branch.
+     */
+    public function canMoveStatusTo(string $status): bool
+    {
+        $currentIndex = array_search($this->status, self::STATUS_ORDER);
+        $targetIndex  = array_search($status, self::STATUS_ORDER);
+
+        if ($targetIndex === false) {
+            return $this->status !== 'completed' && $this->status !== 'closed';
+        }
+
+        return $currentIndex === false || $targetIndex > $currentIndex;
+    }
+
+    /**
+     * Moves the status forward to $status, but only if canMoveStatusTo()
+     * allows it - a no-op (returns false) otherwise, so callers along the
+     * main pipeline (acknowledge -> confirm -> check-in) can't accidentally
+     * move a referral backward just by re-running in the wrong order.
+     */
+    public function advanceStatusTo(string $status): bool
+    {
+        if (!$this->canMoveStatusTo($status)) {
+            return false;
+        }
+        $this->update(['status' => $status]);
+        return true;
+    }
+
+    /**
+     * The documents a student must bring/prepare for a given referral type,
+     * shown to them before they confirm an appointment (OSS requirement).
+     * Returns null when nothing additional needs to be brought (e.g. a
+     * counseling/psychological-testing referral - the Referral Slip is
+     * already on the system, so there's nothing extra to prepare).
+     */
+    public static function requiredDocumentsFor(?string $referralType): ?string
+    {
+        return match ($referralType) {
+            'class_attendance' => "1. Original letter of explanation duly signed by the parent, guardian, or concerned teacher in relation to absences and tardiness, if applicable - 1 original copy\n"
+                . "2. Valid ID of the Guardian or Parent, if applicable - 1 photocopy\n"
+                . "3. One photocopy of ANY of the following supporting documents (original copy for verification), whichever is applicable: Verified Medical Certificate; Approved Travel Order; Death Certificate / Obituary / Barangay Certification of Death of Deceased Relative; Invitation letters or programs with the name of the student indicated; Marriage Certificate; Baptismal Certificate; or Wedding Invitation/Baptism indicating the student's name as sponsor.",
+
+            'academic_deficiency' => "1. Validated BSU ID or Enrollment Form with another valid ID.",
+
+            'leave_of_absence', 'withdrawal', 'readmission', 'shifting' => "1. Client Intake Form (QF-OSS-GCU-01)\n"
+                . "2. Forms from the Registrar.",
+
+            // Counseling / psychological testing: the Referral Slip is
+            // already on the system, so there's nothing additional to bring.
+            'counseling', 'psychological_testing' => null,
+
+            default => null,
+        };
+    }
+
+    /**
+     * Which Appointment::appointment_type the first GCU/SDU appointment for
+     * this referral should actually be created as - previously this was
+     * hardcoded to 'initial_counseling' for every referral type, so a
+     * class-attendance or academic-deficiency referral's appointment showed
+     * "Initial Counseling" as its Service even though that's not the
+     * service being given. Mapped onto the existing appointment_type enum
+     * (widened in 2026_09_28_193000_widen_appointment_type_enum_on_appointments_table)
+     * rather than adding new values, so no further migration is needed.
+     */
+    public static function appointmentTypeFor(?string $referralType): string
+    {
+        return match ($referralType) {
+            'counseling'          => 'initial_counseling',
+            'academic_deficiency' => 'academic_coaching',
+            'disciplinary'        => 'disciplinary_conference',
+            // Class attendance and LOA/withdrawal/readmission/shifting are
+            // all a sit-down with OSS to go over documents/forms, not a
+            // counseling session - closest existing fit is 'consultation'.
+            'class_attendance', 'leave_of_absence', 'withdrawal', 'readmission', 'shifting' => 'consultation',
+            default => 'initial_counseling',
+        };
+    }
+}

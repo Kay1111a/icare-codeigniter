@@ -1,0 +1,183 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\DB;
+
+class CaseFile extends Model
+{
+    use HasFactory, SoftDeletes;
+
+    protected $table = 'cases';
+
+    protected $fillable = [
+        'case_number',
+        'student_id',
+        'primary_counselor_id',
+        'previous_counselor_id',
+        'current_unit',
+        'case_type',
+        'status',
+        'opened_date',
+        'closed_date',
+        'target_resolution_date',
+        'total_sessions',
+        'last_session_at',
+        'presenting_concern',
+        'interventions_applied',
+        'outcomes',
+        'recommendations',
+        'closure_summary',
+        'is_recurring',
+        'requires_follow_up',
+        'follow_up_notes',
+        'follow_up_flagged_at',
+        'follow_up_flagged_by',
+        'referred_to_tmdu',
+        'referred_externally',
+        'external_referral_destination',
+        'student_unreachable',
+        'unreachable_flagged_at',
+        'unreachable_flagged_by',
+        'unreachable_notes',
+        'status_changed_at',
+        'follow_up_due_date',
+        'no_show_count',
+        'is_severe',
+        'severe_reason',
+        'severe_flagged_at',
+        'severe_flagged_by',
+    ];
+
+    protected $casts = [
+        'opened_date'             => 'date',
+        'closed_date'             => 'date',
+        'target_resolution_date'  => 'date',
+        'last_session_at'         => 'datetime',
+        'is_recurring'            => 'boolean',
+        'requires_follow_up'      => 'boolean',
+        'follow_up_flagged_at'    => 'datetime',
+        'referred_to_tmdu'        => 'boolean',
+        'referred_externally'     => 'boolean',
+        'student_unreachable'     => 'boolean',
+        'unreachable_flagged_at'  => 'datetime',
+        'status_changed_at'       => 'datetime',
+        'follow_up_due_date'      => 'date',
+        'is_severe'               => 'boolean',
+        'severe_flagged_at'       => 'datetime',
+    ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (CaseFile $case) {
+            // One case per student for life, so the student's own ID number
+            // is already a stable, unique key - no separate counter needed.
+            $studentIdNumber = Student::whereKey($case->student_id)->value('student_id');
+            $case->case_number = 'CASE-' . ($studentIdNumber ?: $case->student_id);
+            $case->status_changed_at = now();
+        });
+
+        // Every student with a case needs a Ctrl No. for their Student
+        // Information File. Assigning the next free one here - the one
+        // place every case gets created, whatever flow started it - keeps
+        // it consistent automatically, instead of relying on staff to
+        // notice and catch up through the bulk-assign tool afterward.
+        static::created(function (CaseFile $case) {
+            DB::transaction(function () use ($case) {
+                $student = Student::whereKey($case->student_id)->lockForUpdate()->first();
+                if (!$student || !is_null($student->sif_client_no)) {
+                    return;
+                }
+                $next = (int) (Student::lockForUpdate()->max('sif_client_no') ?? 0) + 1;
+                $student->forceFill(['sif_client_no' => $next])->save();
+                AuditLog::record(
+                    'updated',
+                    "Auto-assigned SIF client no. {$next} to {$student->student_id} (first case opened).",
+                    $student
+                );
+            });
+        });
+
+        // Centralized so every status change - wherever it happens - resets
+        // the inactivity clock the automatic status engine reads from.
+        static::updating(function (CaseFile $case) {
+            if ($case->isDirty('status')) {
+                $case->status_changed_at = now();
+
+                // The closing date follows the status too, unless the caller
+                // set one itself: stamped when the case is resolved or closed,
+                // cleared when it is reopened. Reports measure days-to-close from it.
+                if (!$case->isDirty('closed_date')) {
+                    $done = in_array($case->status, ['resolved', 'closed'], true);
+                    if ($done && !$case->closed_date) {
+                        $case->closed_date = today();
+                    } elseif (!$done) {
+                        $case->closed_date = null;
+                    }
+                }
+            }
+        });
+    }
+
+    public function student()       { return $this->belongsTo(Student::class); }
+    public function referrals()     { return $this->hasMany(Referral::class, 'case_id')->orderBy('created_at'); }
+    public function latestReferral(){ return $this->hasOne(Referral::class, 'case_id')->latestOfMany(); }
+    public function counselor()     { return $this->belongsTo(User::class, 'primary_counselor_id'); }
+    // B562: the counselor this case was reassigned away from - kept so they
+    // can still see it (read-only) under "Reassigned/History".
+    public function previousCounselor() { return $this->belongsTo(User::class, 'previous_counselor_id'); }
+    public function flaggedBy()     { return $this->belongsTo(User::class, 'unreachable_flagged_by'); }
+    public function severeFlaggedBy() { return $this->belongsTo(User::class, 'severe_flagged_by'); }
+    public function followUpFlaggedBy() { return $this->belongsTo(User::class, 'follow_up_flagged_by'); }
+    public function interventions()  { return $this->hasMany(CaseIntervention::class, 'case_id')->latest(); }
+    public function sessionNotes()  { return $this->hasMany(SessionNote::class, 'case_id')->orderBy('session_date'); }
+    public function appointments()  { return $this->hasMany(Appointment::class, 'case_id')->orderBy('appointment_date'); }
+    public function testingRecord() { return $this->hasOne(TestingRecord::class, 'case_id')->latestOfMany(); }
+    public function handoffs()      { return $this->hasMany(CaseHandoff::class, 'case_id'); }
+    public function documents()     { return $this->morphMany(Document::class, 'documentable'); }
+    // Immutable history of every Parent Conference Slip issued for this
+    // case - the slip is handed to the parent/guardian face-to-face, so
+    // this is just GCU's own record of each issuance. Newest first.
+    public function parentConferenceSlips() { return $this->hasMany(ParentConferenceSlip::class, 'case_id')->latest('issued_at'); }
+
+    public function isOpen(): bool  { return !in_array($this->status, ['resolved', 'closed']); }
+
+    // Gate for Case Action in the SIF: sending a Feedback Slip, referring to
+    // TMDU, or completing a referral should only be possible once an
+    // appointment under this case has actually happened - "set" (any row
+    // exists) is not enough, the student has to have shown up (status
+    // 'completed', set by AppointmentController::checkIn()).
+    public function hasAttendedAppointment(): bool
+    {
+        return $this->appointments()->where('status', 'completed')->exists();
+    }
+
+    // Anything that would make an inactivity-based auto-transition wrong:
+    // a session logged recently, an intervention logged recently, or an
+    // upcoming appointment that just hasn't happened yet.
+    public function hasRecentActivity(int $days): bool
+    {
+        $since = now()->subDays($days);
+
+        if ($this->last_session_at && $this->last_session_at->gte($since)) {
+            return true;
+        }
+
+        if ($this->interventions()->where('created_at', '>=', $since)->exists()) {
+            return true;
+        }
+
+        if ($this->appointments()
+            ->where('appointment_date', '>=', now()->toDateString())
+            ->whereNotIn('status', ['cancelled'])
+            ->exists()
+        ) {
+            return true;
+        }
+
+        return false;
+    }
+}

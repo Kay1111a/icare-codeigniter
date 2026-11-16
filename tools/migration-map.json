@@ -1,0 +1,662 @@
+[
+  {
+    "source": "2014_10_12_000000_create_users_table.php",
+    "target": "app/Database/Migrations/2014-10-12-000000_M20141012000000CreateUsersTable.php",
+    "class": "App\\Database\\Migrations\\M20141012000000CreateUsersTable"
+  },
+  {
+    "source": "2014_10_12_100000_create_password_reset_tokens_table.php",
+    "target": "app/Database/Migrations/2014-10-12-100000_M20141012100000CreatePasswordResetTokensTable.php",
+    "class": "App\\Database\\Migrations\\M20141012100000CreatePasswordResetTokensTable"
+  },
+  {
+    "source": "2019_08_19_000000_create_failed_jobs_table.php",
+    "target": "app/Database/Migrations/2019-08-19-000000_M20190819000000CreateFailedJobsTable.php",
+    "class": "App\\Database\\Migrations\\M20190819000000CreateFailedJobsTable"
+  },
+  {
+    "source": "2019_12_14_000001_create_personal_access_tokens_table.php",
+    "target": "app/Database/Migrations/2019-12-14-000001_M20191214000001CreatePersonalAccessTokensTable.php",
+    "class": "App\\Database\\Migrations\\M20191214000001CreatePersonalAccessTokensTable"
+  },
+  {
+    "source": "2026_07_04_115452_create_students_table.php",
+    "target": "app/Database/Migrations/2026-07-04-115452_M20260704115452CreateStudentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260704115452CreateStudentsTable"
+  },
+  {
+    "source": "2026_07_04_115453_create_referrals_table.php",
+    "target": "app/Database/Migrations/2026-07-04-115453_M20260704115453CreateReferralsTable.php",
+    "class": "App\\Database\\Migrations\\M20260704115453CreateReferralsTable"
+  },
+  {
+    "source": "2026_07_04_115454_create_cases_table.php",
+    "target": "app/Database/Migrations/2026-07-04-115454_M20260704115454CreateCasesTable.php",
+    "class": "App\\Database\\Migrations\\M20260704115454CreateCasesTable"
+  },
+  {
+    "source": "2026_07_04_115455_create_appointments_table.php",
+    "target": "app/Database/Migrations/2026-07-04-115455_M20260704115455CreateAppointmentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260704115455CreateAppointmentsTable"
+  },
+  {
+    "source": "2026_07_04_115455_create_session_notes_table.php",
+    "target": "app/Database/Migrations/2026-07-04-115456_M20260704115456CreateSessionNotesTable.php",
+    "class": "App\\Database\\Migrations\\M20260704115456CreateSessionNotesTable"
+  },
+  {
+    "source": "2026_07_04_115456_create_documents_table.php",
+    "target": "app/Database/Migrations/2026-07-04-115457_M20260704115457CreateDocumentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260704115457CreateDocumentsTable"
+  },
+  {
+    "source": "2026_07_04_115456_create_testing_records_table.php",
+    "target": "app/Database/Migrations/2026-07-04-115458_M20260704115458CreateTestingRecordsTable.php",
+    "class": "App\\Database\\Migrations\\M20260704115458CreateTestingRecordsTable"
+  },
+  {
+    "source": "2026_07_04_115457_create_notification_logs_table.php",
+    "target": "app/Database/Migrations/2026-07-04-115459_M20260704115459CreateNotificationLogsTable.php",
+    "class": "App\\Database\\Migrations\\M20260704115459CreateNotificationLogsTable"
+  },
+  {
+    "source": "2026_07_04_115458_create_audit_logs_table.php",
+    "target": "app/Database/Migrations/2026-07-04-115500_M20260704115500CreateAuditLogsTable.php",
+    "class": "App\\Database\\Migrations\\M20260704115500CreateAuditLogsTable"
+  },
+  {
+    "source": "2026_07_04_115458_create_staff_availability_table.php",
+    "target": "app/Database/Migrations/2026-07-04-115501_M20260704115501CreateStaffAvailabilityTable.php",
+    "class": "App\\Database\\Migrations\\M20260704115501CreateStaffAvailabilityTable"
+  },
+  {
+    "source": "2026_07_04_115459_create_case_handoffs_table.php",
+    "target": "app/Database/Migrations/2026-07-04-115502_M20260704115502CreateCaseHandoffsTable.php",
+    "class": "App\\Database\\Migrations\\M20260704115502CreateCaseHandoffsTable"
+  },
+  {
+    "source": "2026_07_25_182300_add_unreachable_flag_to_cases_table.php",
+    "target": "app/Database/Migrations/2026-07-25-182300_M20260725182300AddUnreachableFlagToCasesTable.php",
+    "class": "App\\Database\\Migrations\\M20260725182300AddUnreachableFlagToCasesTable"
+  },
+  {
+    "source": "2026_08_19_170701_add_referrer_source_to_referrals_table.php",
+    "target": "app/Database/Migrations/2026-08-19-170701_M20260819170701AddReferrerSourceToReferralsTable.php",
+    "class": "App\\Database\\Migrations\\M20260819170701AddReferrerSourceToReferralsTable"
+  },
+  {
+    "source": "2026_08_29_134337_add_is_archived_to_referrals_table.php",
+    "target": "app/Database/Migrations/2026-08-29-134337_M20260829134337AddIsArchivedToReferralsTable.php",
+    "class": "App\\Database\\Migrations\\M20260829134337AddIsArchivedToReferralsTable"
+  },
+  {
+    "source": "2026_09_06_144251_add_first_last_name_to_users_table.php",
+    "target": "app/Database/Migrations/2026-09-06-144251_M20260906144251AddFirstLastNameToUsersTable.php",
+    "class": "App\\Database\\Migrations\\M20260906144251AddFirstLastNameToUsersTable"
+  },
+  {
+    "source": "2026_09_08_145538_create_cache_table.php",
+    "target": "app/Database/Migrations/2026-09-08-145538_M20260908145538CreateCacheTable.php",
+    "class": "App\\Database\\Migrations\\M20260908145538CreateCacheTable"
+  },
+  {
+    "source": "2026_09_08_153804_add_middle_name_to_users_table.php",
+    "target": "app/Database/Migrations/2026-09-08-153804_M20260908153804AddMiddleNameToUsersTable.php",
+    "class": "App\\Database\\Migrations\\M20260908153804AddMiddleNameToUsersTable"
+  },
+  {
+    "source": "2026_09_09_034743_change_referral_type_to_string_on_referrals_table.php",
+    "target": "app/Database/Migrations/2026-09-09-034743_M20260909034743ChangeReferralTypeToStringOnReferralsTable.php",
+    "class": "App\\Database\\Migrations\\M20260909034743ChangeReferralTypeToStringOnReferralsTable"
+  },
+  {
+    "source": "2026_09_09_040532_split_guardian_name_on_students_table.php",
+    "target": "app/Database/Migrations/2026-09-09-040532_M20260909040532SplitGuardianNameOnStudentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260909040532SplitGuardianNameOnStudentsTable"
+  },
+  {
+    "source": "2026_09_09_130421_change_case_type_to_string_on_cases_table.php",
+    "target": "app/Database/Migrations/2026-09-09-130421_M20260909130421ChangeCaseTypeToStringOnCasesTable.php",
+    "class": "App\\Database\\Migrations\\M20260909130421ChangeCaseTypeToStringOnCasesTable"
+  },
+  {
+    "source": "2026_09_10_123354_redesign_appointments_for_student_scheduling.php",
+    "target": "app/Database/Migrations/2026-09-10-123354_M20260910123354RedesignAppointmentsForStudentScheduling.php",
+    "class": "App\\Database\\Migrations\\M20260910123354RedesignAppointmentsForStudentScheduling"
+  },
+  {
+    "source": "2026_09_10_134009_redesign_appointments_for_student_scheduling.php",
+    "target": "app/Database/Migrations/2026-09-10-134009_M20260910134009RedesignAppointmentsForStudentScheduling.php",
+    "class": "App\\Database\\Migrations\\M20260910134009RedesignAppointmentsForStudentScheduling"
+  },
+  {
+    "source": "2026_09_11_083505_create_student_cases_table.php",
+    "target": "app/Database/Migrations/2026-09-11-083505_M20260911083505CreateStudentCasesTable.php",
+    "class": "App\\Database\\Migrations\\M20260911083505CreateStudentCasesTable"
+  },
+  {
+    "source": "2026_09_11_121653_add_login_credentials_to_students_table.php",
+    "target": "app/Database/Migrations/2026-09-11-121653_M20260911121653AddLoginCredentialsToStudentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260911121653AddLoginCredentialsToStudentsTable"
+  },
+  {
+    "source": "2026_09_11_140000_link_referrals_to_cases_per_student.php",
+    "target": "app/Database/Migrations/2026-09-11-140000_M20260911140000LinkReferralsToCasesPerStudent.php",
+    "class": "App\\Database\\Migrations\\M20260911140000LinkReferralsToCasesPerStudent"
+  },
+  {
+    "source": "2026_09_12_065549_remove_unique_constraint_from_cases_student_id.php",
+    "target": "app/Database/Migrations/2026-09-12-065549_M20260912065549RemoveUniqueConstraintFromCasesStudentId.php",
+    "class": "App\\Database\\Migrations\\M20260912065549RemoveUniqueConstraintFromCasesStudentId"
+  },
+  {
+    "source": "2026_09_12_132726_drop_cases_student_id_unique_constraint.php",
+    "target": "app/Database/Migrations/2026-09-12-132726_M20260912132726DropCasesStudentIdUniqueConstraint.php",
+    "class": "App\\Database\\Migrations\\M20260912132726DropCasesStudentIdUniqueConstraint"
+  },
+  {
+    "source": "2026_09_13_000000_create_notifications_table.php",
+    "target": "app/Database/Migrations/2026-09-13-000000_M20260913000000CreateNotificationsTable.php",
+    "class": "App\\Database\\Migrations\\M20260913000000CreateNotificationsTable"
+  },
+  {
+    "source": "2026_09_13_000001_drop_student_cases_table.php",
+    "target": "app/Database/Migrations/2026-09-13-000001_M20260913000001DropStudentCasesTable.php",
+    "class": "App\\Database\\Migrations\\M20260913000001DropStudentCasesTable"
+  },
+  {
+    "source": "2026_09_13_000002_restructure_cases_one_per_student.php",
+    "target": "app/Database/Migrations/2026-09-13-000002_M20260913000002RestructureCasesOnePerStudent.php",
+    "class": "App\\Database\\Migrations\\M20260913000002RestructureCasesOnePerStudent"
+  },
+  {
+    "source": "2026_09_13_000003_make_year_level_nullable_on_students_table.php",
+    "target": "app/Database/Migrations/2026-09-13-000003_M20260913000003MakeYearLevelNullableOnStudentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260913000003MakeYearLevelNullableOnStudentsTable"
+  },
+  {
+    "source": "2026_09_13_000004_make_college_nullable_on_students_table.php",
+    "target": "app/Database/Migrations/2026-09-13-000004_M20260913000004MakeCollegeNullableOnStudentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260913000004MakeCollegeNullableOnStudentsTable"
+  },
+  {
+    "source": "2026_09_13_000005_add_referral_id_to_session_notes_table.php",
+    "target": "app/Database/Migrations/2026-09-13-000005_M20260913000005AddReferralIdToSessionNotesTable.php",
+    "class": "App\\Database\\Migrations\\M20260913000005AddReferralIdToSessionNotesTable"
+  },
+  {
+    "source": "2026_09_13_000006_add_slips_to_referrals_table.php",
+    "target": "app/Database/Migrations/2026-09-13-000006_M20260913000006AddSlipsToReferralsTable.php",
+    "class": "App\\Database\\Migrations\\M20260913000006AddSlipsToReferralsTable"
+  },
+  {
+    "source": "2026_09_13_000007_add_referral_id_to_appointments_table.php",
+    "target": "app/Database/Migrations/2026-09-13-000007_M20260913000007AddReferralIdToAppointmentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260913000007AddReferralIdToAppointmentsTable"
+  },
+  {
+    "source": "2026_09_13_000008_add_follow_up_flag_to_cases_table.php",
+    "target": "app/Database/Migrations/2026-09-13-000008_M20260913000008AddFollowUpFlagToCasesTable.php",
+    "class": "App\\Database\\Migrations\\M20260913000008AddFollowUpFlagToCasesTable"
+  },
+  {
+    "source": "2026_09_13_000009_add_intervention_fields_to_cases_table.php",
+    "target": "app/Database/Migrations/2026-09-13-000009_M20260913000009AddInterventionFieldsToCasesTable.php",
+    "class": "App\\Database\\Migrations\\M20260913000009AddInterventionFieldsToCasesTable"
+  },
+  {
+    "source": "2026_09_13_000010_create_case_interventions_table.php",
+    "target": "app/Database/Migrations/2026-09-13-000010_M20260913000010CreateCaseInterventionsTable.php",
+    "class": "App\\Database\\Migrations\\M20260913000010CreateCaseInterventionsTable"
+  },
+  {
+    "source": "2026_09_13_000011_add_referral_id_to_case_interventions_table.php",
+    "target": "app/Database/Migrations/2026-09-13-000011_M20260913000011AddReferralIdToCaseInterventionsTable.php",
+    "class": "App\\Database\\Migrations\\M20260913000011AddReferralIdToCaseInterventionsTable"
+  },
+  {
+    "source": "2026_09_13_040532_add_referral_id_back_to_cases_table.php",
+    "target": "app/Database/Migrations/2026-09-13-040532_M20260913040532AddReferralIdBackToCasesTable.php",
+    "class": "App\\Database\\Migrations\\M20260913040532AddReferralIdBackToCasesTable"
+  },
+  {
+    "source": "2026_09_13_072456_add_temp_password_fields_to_users_table.php",
+    "target": "app/Database/Migrations/2026-09-13-072456_M20260913072456AddTempPasswordFieldsToUsersTable.php",
+    "class": "App\\Database\\Migrations\\M20260913072456AddTempPasswordFieldsToUsersTable"
+  },
+  {
+    "source": "2026_09_13_072514_add_temp_password_to_students_table.php",
+    "target": "app/Database/Migrations/2026-09-13-072514_M20260913072514AddTempPasswordToStudentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260913072514AddTempPasswordToStudentsTable"
+  },
+  {
+    "source": "2026_09_15_141541_remove_leftover_referral_id_from_cases_table.php",
+    "target": "app/Database/Migrations/2026-09-15-141541_M20260915141541RemoveLeftoverReferralIdFromCasesTable.php",
+    "class": "App\\Database\\Migrations\\M20260915141541RemoveLeftoverReferralIdFromCasesTable"
+  },
+  {
+    "source": "2026_09_16_000001_add_completion_to_case_interventions_table.php",
+    "target": "app/Database/Migrations/2026-09-16-000001_M20260916000001AddCompletionToCaseInterventionsTable.php",
+    "class": "App\\Database\\Migrations\\M20260916000001AddCompletionToCaseInterventionsTable"
+  },
+  {
+    "source": "2026_09_16_000002_create_backup_records_table.php",
+    "target": "app/Database/Migrations/2026-09-16-000002_M20260916000002CreateBackupRecordsTable.php",
+    "class": "App\\Database\\Migrations\\M20260916000002CreateBackupRecordsTable"
+  },
+  {
+    "source": "2026_09_17_040515_add_required_documents_and_reschedule_count_to_appointments_table.php",
+    "target": "app/Database/Migrations/2026-09-17-040515_M20260917040515AddRequiredDocumentsAndRescheduleCountToAppointmentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260917040515AddRequiredDocumentsAndRescheduleCountToAppointmentsTable"
+  },
+  {
+    "source": "2026_09_17_063217_add_suffix_to_students_table.php",
+    "target": "app/Database/Migrations/2026-09-17-063217_M20260917063217AddSuffixToStudentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260917063217AddSuffixToStudentsTable"
+  },
+  {
+    "source": "2026_09_17_112643_add_status_changed_at_to_cases_table.php",
+    "target": "app/Database/Migrations/2026-09-17-112643_M20260917112643AddStatusChangedAtToCasesTable.php",
+    "class": "App\\Database\\Migrations\\M20260917112643AddStatusChangedAtToCasesTable"
+  },
+  {
+    "source": "2026_09_17_142101_add_type_to_case_interventions_table.php",
+    "target": "app/Database/Migrations/2026-09-17-142101_M20260917142101AddTypeToCaseInterventionsTable.php",
+    "class": "App\\Database\\Migrations\\M20260917142101AddTypeToCaseInterventionsTable"
+  },
+  {
+    "source": "2026_09_18_141817_add_suffix_to_users_table.php",
+    "target": "app/Database/Migrations/2026-09-18-141817_M20260918141817AddSuffixToUsersTable.php",
+    "class": "App\\Database\\Migrations\\M20260918141817AddSuffixToUsersTable"
+  },
+  {
+    "source": "2026_09_18_142348_add_sanction_to_referrals_table.php",
+    "target": "app/Database/Migrations/2026-09-18-142348_M20260918142348AddSanctionToReferralsTable.php",
+    "class": "App\\Database\\Migrations\\M20260918142348AddSanctionToReferralsTable"
+  },
+  {
+    "source": "2026_09_20_043518_add_deactivation_reason_to_students_table.php",
+    "target": "app/Database/Migrations/2026-09-20-043518_M20260920043518AddDeactivationReasonToStudentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260920043518AddDeactivationReasonToStudentsTable"
+  },
+  {
+    "source": "2026_09_20_061511_add_follow_up_due_date_to_cases_table.php",
+    "target": "app/Database/Migrations/2026-09-20-061511_M20260920061511AddFollowUpDueDateToCasesTable.php",
+    "class": "App\\Database\\Migrations\\M20260920061511AddFollowUpDueDateToCasesTable"
+  },
+  {
+    "source": "2026_09_21_000000_make_appointment_fks_nullable_for_student_booking.php",
+    "target": "app/Database/Migrations/2026-09-21-000000_M20260921000000MakeAppointmentFksNullableForStudentBooking.php",
+    "class": "App\\Database\\Migrations\\M20260921000000MakeAppointmentFksNullableForStudentBooking"
+  },
+  {
+    "source": "2026_09_22_100000_add_on_observation_to_cases_status.php",
+    "target": "app/Database/Migrations/2026-09-22-100000_M20260922100000AddOnObservationToCasesStatus.php",
+    "class": "App\\Database\\Migrations\\M20260922100000AddOnObservationToCasesStatus"
+  },
+  {
+    "source": "2026_09_23_000000_add_checklist_to_feedback_slip.php",
+    "target": "app/Database/Migrations/2026-09-23-000000_M20260923000000AddChecklistToFeedbackSlip.php",
+    "class": "App\\Database\\Migrations\\M20260923000000AddChecklistToFeedbackSlip"
+  },
+  {
+    "source": "2026_09_23_000001_create_colleges_table.php",
+    "target": "app/Database/Migrations/2026-09-23-000001_M20260923000001CreateCollegesTable.php",
+    "class": "App\\Database\\Migrations\\M20260923000001CreateCollegesTable"
+  },
+  {
+    "source": "2026_09_23_000002_create_programs_table.php",
+    "target": "app/Database/Migrations/2026-09-23-000002_M20260923000002CreateProgramsTable.php",
+    "class": "App\\Database\\Migrations\\M20260923000002CreateProgramsTable"
+  },
+  {
+    "source": "2026_09_23_000003_create_departments_table.php",
+    "target": "app/Database/Migrations/2026-09-23-000003_M20260923000003CreateDepartmentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260923000003CreateDepartmentsTable"
+  },
+  {
+    "source": "2026_09_23_000004_create_referral_form_options_table.php",
+    "target": "app/Database/Migrations/2026-09-23-000004_M20260923000004CreateReferralFormOptionsTable.php",
+    "class": "App\\Database\\Migrations\\M20260923000004CreateReferralFormOptionsTable"
+  },
+  {
+    "source": "2026_09_23_000005_add_system_admin_to_users_role_enum.php",
+    "target": "app/Database/Migrations/2026-09-23-000005_M20260923000005AddSystemAdminToUsersRoleEnum.php",
+    "class": "App\\Database\\Migrations\\M20260923000005AddSystemAdminToUsersRoleEnum"
+  },
+  {
+    "source": "2026_09_23_000006_create_complaints_table.php",
+    "target": "app/Database/Migrations/2026-09-23-000006_M20260923000006CreateComplaintsTable.php",
+    "class": "App\\Database\\Migrations\\M20260923000006CreateComplaintsTable"
+  },
+  {
+    "source": "2026_09_23_000007_add_complainant_and_complainee_details_to_complaints_table.php",
+    "target": "app/Database/Migrations/2026-09-23-000007_M20260923000007AddComplainantAndComplaineeDetailsToComplaintsTable.php",
+    "class": "App\\Database\\Migrations\\M20260923000007AddComplainantAndComplaineeDetailsToComplaintsTable"
+  },
+  {
+    "source": "2026_09_23_000008_create_complaint_attachments_table.php",
+    "target": "app/Database/Migrations/2026-09-23-000008_M20260923000008CreateComplaintAttachmentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260923000008CreateComplaintAttachmentsTable"
+  },
+  {
+    "source": "2026_09_23_000009_add_consent_accepted_at_to_students_table.php",
+    "target": "app/Database/Migrations/2026-09-23-000009_M20260923000009AddConsentAcceptedAtToStudentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260923000009AddConsentAcceptedAtToStudentsTable"
+  },
+  {
+    "source": "2026_09_23_000010_create_document_settings_table.php",
+    "target": "app/Database/Migrations/2026-09-23-000010_M20260923000010CreateDocumentSettingsTable.php",
+    "class": "App\\Database\\Migrations\\M20260923000010CreateDocumentSettingsTable"
+  },
+  {
+    "source": "2026_09_23_000011_add_unit_to_referral_form_options_table.php",
+    "target": "app/Database/Migrations/2026-09-23-000011_M20260923000011AddUnitToReferralFormOptionsTable.php",
+    "class": "App\\Database\\Migrations\\M20260923000011AddUnitToReferralFormOptionsTable"
+  },
+  {
+    "source": "2026_09_25_212036_add_testing_workflow_fields_to_testing_records_table.php",
+    "target": "app/Database/Migrations/2026-09-25-212036_M20260925212036AddTestingWorkflowFieldsToTestingRecordsTable.php",
+    "class": "App\\Database\\Migrations\\M20260925212036AddTestingWorkflowFieldsToTestingRecordsTable"
+  },
+  {
+    "source": "2026_09_27_214500_add_gcu_referral_link_and_rename_statuses_on_testing_records_table.php",
+    "target": "app/Database/Migrations/2026-09-27-214500_M20260927214500AddGcuReferralLinkAndRenameStatusesOnTestingRecordsTable.php",
+    "class": "App\\Database\\Migrations\\M20260927214500AddGcuReferralLinkAndRenameStatusesOnTestingRecordsTable"
+  },
+  {
+    "source": "2026_09_27_233000_add_complaint_id_to_referrals_table.php",
+    "target": "app/Database/Migrations/2026-09-27-233000_M20260927233000AddComplaintIdToReferralsTable.php",
+    "class": "App\\Database\\Migrations\\M20260927233000AddComplaintIdToReferralsTable"
+  },
+  {
+    "source": "2026_09_28_193000_widen_appointment_type_enum_on_appointments_table.php",
+    "target": "app/Database/Migrations/2026-09-28-193000_M20260928193000WidenAppointmentTypeEnumOnAppointmentsTable.php",
+    "class": "App\\Database\\Migrations\\M20260928193000WidenAppointmentTypeEnumOnAppointmentsTable"
+  },
+  {
+    "source": "2026_09_28_210000_widen_testing_records_status_enum_add_awaiting_results.php",
+    "target": "app/Database/Migrations/2026-09-28-210000_M20260928210000WidenTestingRecordsStatusEnumAddAwaitingResults.php",
+    "class": "App\\Database\\Migrations\\M20260928210000WidenTestingRecordsStatusEnumAddAwaitingResults"
+  },
+  {
+    "source": "2026_09_30_000000_create_feedback_slips_table.php",
+    "target": "app/Database/Migrations/2026-09-30-000000_M20260930000000CreateFeedbackSlipsTable.php",
+    "class": "App\\Database\\Migrations\\M20260930000000CreateFeedbackSlipsTable"
+  },
+  {
+    "source": "2026_10_01_000000_add_referral_id_to_case_handoffs_table.php",
+    "target": "app/Database/Migrations/2026-10-01-000000_M20261001000000AddReferralIdToCaseHandoffsTable.php",
+    "class": "App\\Database\\Migrations\\M20261001000000AddReferralIdToCaseHandoffsTable"
+  },
+  {
+    "source": "2026_10_01_000001_fix_feedback_slips_table_columns.php",
+    "target": "app/Database/Migrations/2026-10-01-000001_M20261001000001FixFeedbackSlipsTableColumns.php",
+    "class": "App\\Database\\Migrations\\M20261001000001FixFeedbackSlipsTableColumns"
+  },
+  {
+    "source": "2026_10_02_000000_add_family_background_to_students_table.php",
+    "target": "app/Database/Migrations/2026-10-02-000000_M20261002000000AddFamilyBackgroundToStudentsTable.php",
+    "class": "App\\Database\\Migrations\\M20261002000000AddFamilyBackgroundToStudentsTable"
+  },
+  {
+    "source": "2026_10_02_000001_add_source_referral_id_to_testing_records_table.php",
+    "target": "app/Database/Migrations/2026-10-02-000001_M20261002000001AddSourceReferralIdToTestingRecordsTable.php",
+    "class": "App\\Database\\Migrations\\M20261002000001AddSourceReferralIdToTestingRecordsTable"
+  },
+  {
+    "source": "2026_10_03_000001_add_admission_excused_to_referrals_table.php",
+    "target": "app/Database/Migrations/2026-10-03-000001_M20261003000001AddAdmissionExcusedToReferralsTable.php",
+    "class": "App\\Database\\Migrations\\M20261003000001AddAdmissionExcusedToReferralsTable"
+  },
+  {
+    "source": "2026_10_04_000001_create_parent_conference_slips_table.php",
+    "target": "app/Database/Migrations/2026-10-04-000001_M20261004000001CreateParentConferenceSlipsTable.php",
+    "class": "App\\Database\\Migrations\\M20261004000001CreateParentConferenceSlipsTable"
+  },
+  {
+    "source": "2026_10_04_000002_add_no_show_count_to_cases_table.php",
+    "target": "app/Database/Migrations/2026-10-04-000002_M20261004000002AddNoShowCountToCasesTable.php",
+    "class": "App\\Database\\Migrations\\M20261004000002AddNoShowCountToCasesTable"
+  },
+  {
+    "source": "2026_10_04_120000_backfill_in_review_referral_statuses.php",
+    "target": "app/Database/Migrations/2026-10-04-120000_M20261004120000BackfillInReviewReferralStatuses.php",
+    "class": "App\\Database\\Migrations\\M20261004120000BackfillInReviewReferralStatuses"
+  },
+  {
+    "source": "2026_10_04_120100_widen_referrals_status_enum_add_cancelled.php",
+    "target": "app/Database/Migrations/2026-10-04-120100_M20261004120100WidenReferralsStatusEnumAddCancelled.php",
+    "class": "App\\Database\\Migrations\\M20261004120100WidenReferralsStatusEnumAddCancelled"
+  },
+  {
+    "source": "2026_10_06_000001_set_tmdu_referral_document_settings.php",
+    "target": "app/Database/Migrations/2026-10-06-000001_M20261006000001SetTmduReferralDocumentSettings.php",
+    "class": "App\\Database\\Migrations\\M20261006000001SetTmduReferralDocumentSettings"
+  },
+  {
+    "source": "2026_10_06_000002_add_notes_to_parent_conference_slips_table.php",
+    "target": "app/Database/Migrations/2026-10-06-000002_M20261006000002AddNotesToParentConferenceSlipsTable.php",
+    "class": "App\\Database\\Migrations\\M20261006000002AddNotesToParentConferenceSlipsTable"
+  },
+  {
+    "source": "2026_10_06_000003_student_information_sheet_fields.php",
+    "target": "app/Database/Migrations/2026-10-06-000003_M20261006000003StudentInformationSheetFields.php",
+    "class": "App\\Database\\Migrations\\M20261006000003StudentInformationSheetFields"
+  },
+  {
+    "source": "2026_10_07_000001_add_dean_and_dept_chair_roles.php",
+    "target": "app/Database/Migrations/2026-10-07-000001_M20261007000001AddDeanAndDeptChairRoles.php",
+    "class": "App\\Database\\Migrations\\M20261007000001AddDeanAndDeptChairRoles"
+  },
+  {
+    "source": "2026_10_08_000001_create_academic_years_table.php",
+    "target": "app/Database/Migrations/2026-10-08-000001_M20261008000001CreateAcademicYearsTable.php",
+    "class": "App\\Database\\Migrations\\M20261008000001CreateAcademicYearsTable"
+  },
+  {
+    "source": "2026_10_08_000002_seed_tmdu_appointment_slip_document_setting.php",
+    "target": "app/Database/Migrations/2026-10-08-000002_M20261008000002SeedTmduAppointmentSlipDocumentSetting.php",
+    "class": "App\\Database\\Migrations\\M20261008000002SeedTmduAppointmentSlipDocumentSetting"
+  },
+  {
+    "source": "2026_10_09_000001_create_student_password_reset_tokens_table.php",
+    "target": "app/Database/Migrations/2026-10-09-000001_M20261009000001CreateStudentPasswordResetTokensTable.php",
+    "class": "App\\Database\\Migrations\\M20261009000001CreateStudentPasswordResetTokensTable"
+  },
+  {
+    "source": "2026_10_09_000002_add_sif_client_no_to_students_table.php",
+    "target": "app/Database/Migrations/2026-10-09-000002_M20261009000002AddSifClientNoToStudentsTable.php",
+    "class": "App\\Database\\Migrations\\M20261009000002AddSifClientNoToStudentsTable"
+  },
+  {
+    "source": "2026_10_09_000003_backfill_parent_conference_slip_referral_ids.php",
+    "target": "app/Database/Migrations/2026-10-09-000003_M20261009000003BackfillParentConferenceSlipReferralIds.php",
+    "class": "App\\Database\\Migrations\\M20261009000003BackfillParentConferenceSlipReferralIds"
+  },
+  {
+    "source": "2026_10_13_000001_add_admission_details_to_referrals_table.php",
+    "target": "app/Database/Migrations/2026-10-13-000001_M20261013000001AddAdmissionDetailsToReferralsTable.php",
+    "class": "App\\Database\\Migrations\\M20261013000001AddAdmissionDetailsToReferralsTable"
+  },
+  {
+    "source": "2026_10_13_000002_add_tmdu_head_role.php",
+    "target": "app/Database/Migrations/2026-10-13-000002_M20261013000002AddTmduHeadRole.php",
+    "class": "App\\Database\\Migrations\\M20261013000002AddTmduHeadRole"
+  },
+  {
+    "source": "2026_10_14_000001_allow_self_referrals.php",
+    "target": "app/Database/Migrations/2026-10-14-000001_M20261014000001AllowSelfReferrals.php",
+    "class": "App\\Database\\Migrations\\M20261014000001AllowSelfReferrals"
+  },
+  {
+    "source": "2026_10_14_000003_add_employee_account_status_history.php",
+    "target": "app/Database/Migrations/2026-10-14-000003_M20261014000003AddEmployeeAccountStatusHistory.php",
+    "class": "App\\Database\\Migrations\\M20261014000003AddEmployeeAccountStatusHistory"
+  },
+  {
+    "source": "2026_10_15_000001_add_student_account_status_history.php",
+    "target": "app/Database/Migrations/2026-10-15-000001_M20261015000001AddStudentAccountStatusHistory.php",
+    "class": "App\\Database\\Migrations\\M20261015000001AddStudentAccountStatusHistory"
+  },
+  {
+    "source": "2026_10_15_000002_add_status_to_management_reference_data.php",
+    "target": "app/Database/Migrations/2026-10-15-000002_M20261015000002AddStatusToManagementReferenceData.php",
+    "class": "App\\Database\\Migrations\\M20261015000002AddStatusToManagementReferenceData"
+  },
+  {
+    "source": "2026_10_16_000001_create_email_logs_table.php",
+    "target": "app/Database/Migrations/2026-10-16-000001_M20261016000001CreateEmailLogsTable.php",
+    "class": "App\\Database\\Migrations\\M20261016000001CreateEmailLogsTable"
+  },
+  {
+    "source": "2026_10_18_000001_add_temp_password_expires_at_to_students.php",
+    "target": "app/Database/Migrations/2026-10-18-000001_M20261018000001AddTempPasswordExpiresAtToStudents.php",
+    "class": "App\\Database\\Migrations\\M20261018000001AddTempPasswordExpiresAtToStudents"
+  },
+  {
+    "source": "2026_10_18_000002_add_temp_password_expires_at_to_users.php",
+    "target": "app/Database/Migrations/2026-10-18-000002_M20261018000002AddTempPasswordExpiresAtToUsers.php",
+    "class": "App\\Database\\Migrations\\M20261018000002AddTempPasswordExpiresAtToUsers"
+  },
+  {
+    "source": "2026_10_18_000003_seed_class_admission_slip_document_setting.php",
+    "target": "app/Database/Migrations/2026-10-18-000003_M20261018000003SeedClassAdmissionSlipDocumentSetting.php",
+    "class": "App\\Database\\Migrations\\M20261018000003SeedClassAdmissionSlipDocumentSetting"
+  },
+  {
+    "source": "2026_10_18_000004_add_student_senders_to_referrals_and_complaints.php",
+    "target": "app/Database/Migrations/2026-10-18-000004_M20261018000004AddStudentSendersToReferralsAndComplaints.php",
+    "class": "App\\Database\\Migrations\\M20261018000004AddStudentSendersToReferralsAndComplaints"
+  },
+  {
+    "source": "2026_10_19_000001_reset_gcu_head_admin_password.php",
+    "target": "app/Database/Migrations/2026-10-19-000001_M20261019000001ResetGcuHeadAdminPassword.php",
+    "class": "App\\Database\\Migrations\\M20261019000001ResetGcuHeadAdminPassword"
+  },
+  {
+    "source": "2026_10_20_000001_add_status_and_current_to_academic_years.php",
+    "target": "app/Database/Migrations/2026-10-20-000001_M20261020000001AddStatusAndCurrentToAcademicYears.php",
+    "class": "App\\Database\\Migrations\\M20261020000001AddStatusAndCurrentToAcademicYears"
+  },
+  {
+    "source": "2026_10_20_000002_add_versions_to_document_settings.php",
+    "target": "app/Database/Migrations/2026-10-20-000002_M20261020000002AddVersionsToDocumentSettings.php",
+    "class": "App\\Database\\Migrations\\M20261020000002AddVersionsToDocumentSettings"
+  },
+  {
+    "source": "2026_10_20_000003_create_calendar_entries_table.php",
+    "target": "app/Database/Migrations/2026-10-20-000003_M20261020000003CreateCalendarEntriesTable.php",
+    "class": "App\\Database\\Migrations\\M20261020000003CreateCalendarEntriesTable"
+  },
+  {
+    "source": "2026_10_20_000004_add_password_change_info.php",
+    "target": "app/Database/Migrations/2026-10-20-000004_M20261020000004AddPasswordChangeInfo.php",
+    "class": "App\\Database\\Migrations\\M20261020000004AddPasswordChangeInfo"
+  },
+  {
+    "source": "2026_10_20_000005_create_appointment_slot_history.php",
+    "target": "app/Database/Migrations/2026-10-20-000005_M20261020000005CreateAppointmentSlotHistory.php",
+    "class": "App\\Database\\Migrations\\M20261020000005CreateAppointmentSlotHistory"
+  },
+  {
+    "source": "2026_10_21_000001_widen_audit_log_description.php",
+    "target": "app/Database/Migrations/2026-10-21-000001_M20261021000001WidenAuditLogDescription.php",
+    "class": "App\\Database\\Migrations\\M20261021000001WidenAuditLogDescription"
+  },
+  {
+    "source": "2026_10_21_000002_create_password_reset_otps_table.php",
+    "target": "app/Database/Migrations/2026-10-21-000002_M20261021000002CreatePasswordResetOtpsTable.php",
+    "class": "App\\Database\\Migrations\\M20261021000002CreatePasswordResetOtpsTable"
+  },
+  {
+    "source": "2026_10_23_000001_add_parent_suffix_to_students_table.php",
+    "target": "app/Database/Migrations/2026-10-23-000001_M20261023000001AddParentSuffixToStudentsTable.php",
+    "class": "App\\Database\\Migrations\\M20261023000001AddParentSuffixToStudentsTable"
+  },
+  {
+    "source": "2026_10_23_000002_add_archive_reason_to_calendar_entries_table.php",
+    "target": "app/Database/Migrations/2026-10-23-000002_M20261023000002AddArchiveReasonToCalendarEntriesTable.php",
+    "class": "App\\Database\\Migrations\\M20261023000002AddArchiveReasonToCalendarEntriesTable"
+  },
+  {
+    "source": "2026_10_23_000003_add_holiday_conflict_fields_to_appointments_table.php",
+    "target": "app/Database/Migrations/2026-10-23-000003_M20261023000003AddHolidayConflictFieldsToAppointmentsTable.php",
+    "class": "App\\Database\\Migrations\\M20261023000003AddHolidayConflictFieldsToAppointmentsTable"
+  },
+  {
+    "source": "2026_10_24_000001_add_guardian_suffix_to_students_table.php",
+    "target": "app/Database/Migrations/2026-10-24-000001_M20261024000001AddGuardianSuffixToStudentsTable.php",
+    "class": "App\\Database\\Migrations\\M20261024000001AddGuardianSuffixToStudentsTable"
+  },
+  {
+    "source": "2026_10_24_000002_add_previous_tester_to_testing_records_table.php",
+    "target": "app/Database/Migrations/2026-10-24-000002_M20261024000002AddPreviousTesterToTestingRecordsTable.php",
+    "class": "App\\Database\\Migrations\\M20261024000002AddPreviousTesterToTestingRecordsTable"
+  },
+  {
+    "source": "2026_10_24_000003_add_previous_counselor_to_cases_table.php",
+    "target": "app/Database/Migrations/2026-10-24-000003_M20261024000003AddPreviousCounselorToCasesTable.php",
+    "class": "App\\Database\\Migrations\\M20261024000003AddPreviousCounselorToCasesTable"
+  },
+  {
+    "source": "2026_10_24_000004_change_testing_records_status_to_string.php",
+    "target": "app/Database/Migrations/2026-10-24-000004_M20261024000004ChangeTestingRecordsStatusToString.php",
+    "class": "App\\Database\\Migrations\\M20261024000004ChangeTestingRecordsStatusToString"
+  },
+  {
+    "source": "2026_10_26_000001_add_content_to_complaint_attachments.php",
+    "target": "app/Database/Migrations/2026-10-26-000001_M20261026000001AddContentToComplaintAttachments.php",
+    "class": "App\\Database\\Migrations\\M20261026000001AddContentToComplaintAttachments"
+  },
+  {
+    "source": "2026_10_27_000001_add_year_level_to_referrals_table.php",
+    "target": "app/Database/Migrations/2026-10-27-000001_M20261027000001AddYearLevelToReferralsTable.php",
+    "class": "App\\Database\\Migrations\\M20261027000001AddYearLevelToReferralsTable"
+  },
+  {
+    "source": "2026_10_27_000002_add_department_id_to_programs_table.php",
+    "target": "app/Database/Migrations/2026-10-27-000002_M20261027000002AddDepartmentIdToProgramsTable.php",
+    "class": "App\\Database\\Migrations\\M20261027000002AddDepartmentIdToProgramsTable"
+  },
+  {
+    "source": "2026_10_28_000001_add_content_to_documents.php",
+    "target": "app/Database/Migrations/2026-10-28-000001_M20261028000001AddContentToDocuments.php",
+    "class": "App\\Database\\Migrations\\M20261028000001AddContentToDocuments"
+  },
+  {
+    "source": "2026_10_28_000002_add_cloud_storage_columns.php",
+    "target": "app/Database/Migrations/2026-10-28-000002_M20261028000002AddCloudStorageColumns.php",
+    "class": "App\\Database\\Migrations\\M20261028000002AddCloudStorageColumns"
+  },
+  {
+    "source": "2026_10_29_000001_add_status_indexes_to_core_tables.php",
+    "target": "app/Database/Migrations/2026-10-29-000001_M20261029000001AddStatusIndexesToCoreTables.php",
+    "class": "App\\Database\\Migrations\\M20261029000001AddStatusIndexesToCoreTables"
+  },
+  {
+    "source": "2026_10_29_000002_make_documents_path_nullable.php",
+    "target": "app/Database/Migrations/2026-10-29-000002_M20261029000002MakeDocumentsPathNullable.php",
+    "class": "App\\Database\\Migrations\\M20261029000002MakeDocumentsPathNullable"
+  },
+  {
+    "source": "2026_10_30_014405_add_void_request_to_referrals_table.php",
+    "target": "app/Database/Migrations/2026-10-30-014405_M20261030014405AddVoidRequestToReferralsTable.php",
+    "class": "App\\Database\\Migrations\\M20261030014405AddVoidRequestToReferralsTable"
+  },
+  {
+    "source": "2026_10_31_000001_clear_legacy_plaintext_temp_passwords.php",
+    "target": "app/Database/Migrations/2026-10-31-000001_M20261031000001ClearLegacyPlaintextTempPasswords.php",
+    "class": "App\\Database\\Migrations\\M20261031000001ClearLegacyPlaintextTempPasswords"
+  },
+  {
+    "source": "2026_11_01_000001_add_severe_flag_to_cases_table.php",
+    "target": "app/Database/Migrations/2026-11-01-000001_M20261101000001AddSevereFlagToCasesTable.php",
+    "class": "App\\Database\\Migrations\\M20261101000001AddSevereFlagToCasesTable"
+  },
+  {
+    "source": "2026_11_04_120000_add_more_performance_indexes.php",
+    "target": "app/Database/Migrations/2026-11-04-120000_M20261104120000AddMorePerformanceIndexes.php",
+    "class": "App\\Database\\Migrations\\M20261104120000AddMorePerformanceIndexes"
+  }
+]

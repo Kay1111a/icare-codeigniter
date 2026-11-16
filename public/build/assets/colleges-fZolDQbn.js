@@ -1,0 +1,2 @@
+function C(a,e){const r=String(a??"").trim();if(!r||!Array.isArray(e))return"";const c=r.toLowerCase(),n=t=>t.replace(/\s*\([^)]*\)\s*$/,"").trim().toLowerCase(),o=e.find(t=>t.toLowerCase()===c);if(o)return o;const s=(r.match(/\(([A-Za-z]{2,8})\)\s*$/)||[])[1]||(/^[A-Za-z]{2,8}$/.test(r)?r:"");if(s){const t=e.find(i=>i.toUpperCase().endsWith(`(${s.toUpperCase()})`));if(t)return t}return e.find(t=>n(t)===n(r))||""}export{C as m};
+//# sourceMappingURL=colleges-fZolDQbn.js.map

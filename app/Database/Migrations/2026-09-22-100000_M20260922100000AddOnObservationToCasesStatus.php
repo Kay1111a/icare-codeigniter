@@ -1,0 +1,69 @@
+<?php
+
+namespace App\Database\Migrations;
+
+use App\Libraries\Bridge\SchemaMigration as Migration;
+use Illuminate\Support\Facades\DB;
+
+class M20260922100000AddOnObservationToCasesStatus extends Migration
+{
+    /**
+     * Case Files now tracks three working states - Open, On Observation and
+     * Resolved. "On Observation" is the middle ground for a case that has been
+     * acted on but still needs watching before it can be resolved.
+     *
+     * The legacy values stay in the enum on purpose: in_progress, awaiting_testing
+     * and closed are still written programmatically elsewhere (for example
+     * CaseController@referToTesting sets awaiting_testing), and existing rows
+     * must keep validating. Only the staff-facing pickers are narrowed.
+     */
+    public function up(): void
+    {
+        if ($this->alreadyApplied('2026_09_22_100000_add_on_observation_to_cases_status')) return;
+        // Raw MySQL enum syntax - no-op on SQLite (used for the RBAC test
+        // suite), which has no MODIFY COLUMN and stores status loosely-typed
+        // anyway, so every value below is already accepted there.
+        if (DB::connection()->getDriverName() !== 'mysql') {
+            return;
+        }
+
+        DB::statement("
+            ALTER TABLE `cases`
+            MODIFY COLUMN `status` ENUM(
+                'open',
+                'on_observation',
+                'in_progress',
+                'awaiting_testing',
+                'awaiting_external',
+                'on_hold',
+                'resolved',
+                'closed'
+            ) NOT NULL DEFAULT 'open'
+        ");
+    }
+
+    public function down(): void
+    {
+        if ($this->alreadyApplied('2026_09_22_100000_add_on_observation_to_cases_status')) return;
+        // Park anything still on the new value back on 'open' so the narrowed
+        // enum below cannot silently blank those rows.
+        DB::table('cases')->where('status', 'on_observation')->update(['status' => 'open']);
+
+        if (DB::connection()->getDriverName() !== 'mysql') {
+            return;
+        }
+
+        DB::statement("
+            ALTER TABLE `cases`
+            MODIFY COLUMN `status` ENUM(
+                'open',
+                'in_progress',
+                'awaiting_testing',
+                'awaiting_external',
+                'on_hold',
+                'resolved',
+                'closed'
+            ) NOT NULL DEFAULT 'open'
+        ");
+    }
+}

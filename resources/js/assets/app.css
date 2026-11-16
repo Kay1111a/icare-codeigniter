@@ -1,0 +1,613 @@
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --forest:#0e2d1e;--pine:#164d30;--moss:#1e6e43;--fern:#2e9458;
+  --sage:#5ab87a;--mint:#a8d8b8;--mist:#dff0e7;--foam:#f0f8f3;
+  --gold:#8fe0b0;--red:#d63d3d;--red-lt:#fde8e8;
+  --amber:#c97020;--amber-lt:#fef0dc;--blue:#2a6fc9;--blue-lt:#ddeeff;
+  --purple:#7c3aed;--purple-lt:#ede9fe;
+  --ink:#0f1a13;--slate:#3a4a3f;--stone:#5f7066;--fog:#a0afa6;
+  --silver:#d4ddd7;--cloud:#eef2ef;--snow:#f8faf9;--white:#fff;
+  --r-xs:4px;--r-sm:8px;--r:12px;--r-lg:16px;--r-xl:24px;
+  --sh-xs:0 1px 2px rgba(0,0,0,.06);
+  --sh-sm:0 2px 8px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.05);
+  --sh:0 4px 16px rgba(0,0,0,.09),0 2px 4px rgba(0,0,0,.06);
+  --sh-lg:0 12px 40px rgba(0,0,0,.14),0 4px 8px rgba(0,0,0,.08);
+  --sb-w:242px;--top-h:58px;
+  --font:'DM Sans',sans-serif;
+  --serif:'Instrument Serif',serif;
+  --mono:'DM Mono',monospace;
+  --ease:cubic-bezier(.4,0,.2,1);
+}
+
+html,body{ height:100%; font-family:var(--font); font-size:14px; color:var(--ink); background:var(--snow); -webkit-font-smoothing:antialiased; }
+#app{ height:100%; }
+
+/* ── SIDEBAR ── */
+.sidebar{width:var(--sb-w);flex-shrink:0;background:var(--forest);display:flex;flex-direction:column;height:100vh;position:relative;overflow:hidden;z-index:50}
+.sidebar::after{content:'';position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse 80% 40% at 50% 100%,rgba(46,148,88,.07) 0%,transparent 55%)}
+.sb-head{padding:18px 16px 14px;border-bottom:1px solid rgba(255,255,255,.05);display:flex;align-items:center;gap:9px;flex-shrink:0}
+.sb-mark{width:30px;height:30px;background:#fff;border-radius:var(--r-xs);padding:3px;object-fit:contain;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+.sb-brand{font-size:14px;font-weight:600;color:#fff}
+.sb-sub{font-size:9px;color:rgba(255,255,255,.22);letter-spacing:.5px;text-transform:uppercase;margin-top:1px}
+.sb-nav{flex:1;overflow-y:auto;padding:8px 8px 0}
+.sb-nav::-webkit-scrollbar{display:none}
+.sb-sec{font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,.2);padding:14px 8px 4px}
+.nb{display:flex;align-items:center;gap:8px;width:100%;padding:9px 10px;border-radius:var(--r-sm);border:none;background:none;cursor:pointer;color:rgba(255,255,255,.44);font-family:var(--font);font-size:13px;font-weight:400;text-align:left;transition:background .12s,color .12s;margin-bottom:1px;position:relative;text-decoration:none}
+.nb:hover{background:rgba(255,255,255,.06);color:rgba(255,255,255,.78)}
+.nb.active{background:rgba(90,184,122,.12);color:var(--sage);font-weight:500}
+.nb.active::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:18px;background:var(--sage);border-radius:0 3px 3px 0}
+.nb svg{width:16px;height:16px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+.sb-foot{padding:10px;border-top:1px solid rgba(255,255,255,.05);flex-shrink:0}
+.u-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--r-sm);background:rgba(255,255,255,.04)}
+.u-av{width:28px;height:28px;border-radius:50%;background:var(--moss);color:#fff;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;flex-shrink:0}
+.u-nm{font-size:12px;font-weight:500;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.u-rl{font-size:9.5px;color:rgba(255,255,255,.28)}
+.logbtn{margin-left:auto;flex-shrink:0;background:none;border:none;color:rgba(255,255,255,.24);cursor:pointer;padding:4px;border-radius:5px;display:flex;transition:color .12s,background .12s}
+.logbtn:hover{color:rgba(255,255,255,.6);background:rgba(255,255,255,.08)}
+.logbtn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── TOPBAR ── */
+.topbar{height:var(--top-h);flex-shrink:0;background:#fff;border-bottom:1px solid var(--cloud);display:flex;align-items:center;padding:0 18px;gap:10px;box-shadow:var(--sh-xs);position:relative;z-index:10}
+.breadcrumb-nav{font-size:13px;color:var(--fog)}
+.breadcrumb-nav strong{color:var(--ink);font-weight:500}
+.tb-right{margin-left:auto;display:flex;align-items:center;gap:7px;flex-shrink:0}
+
+/* ── CONTENT ── */
+.content-area{flex:1;overflow-y:auto;background:var(--cloud);padding:22px}
+.content-area::-webkit-scrollbar{width:4px}
+.content-area::-webkit-scrollbar-thumb{background:var(--silver);border-radius:2px}
+
+/* ── PAGE HEADER ── */
+.ph h1{font-family:var(--serif);font-style:italic;font-size:26px;color:var(--forest);font-weight:400;margin-bottom:3px;line-height:1.2}
+.ph p{font-size:13px;color:var(--stone)}
+
+/* ── CARDS ── */
+.icard{background:#fff;border-radius:var(--r-lg);border:1px solid rgba(0,0,0,.05);box-shadow:var(--sh-sm);overflow:hidden}
+.icard-header{padding:14px 18px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between;gap:10px}
+.icard-title{font-size:13.5px;font-weight:600;color:var(--ink)}
+.icard-body{padding:18px}
+
+/* ── STAT CARDS ── */
+.stat-card{background:#fff;border-radius:var(--r-lg);padding:18px;border:1px solid rgba(0,0,0,.05);box-shadow:var(--sh-xs);transition:transform .15s,box-shadow .15s;cursor:pointer}
+.stat-card:hover{transform:translateY(-2px);box-shadow:var(--sh-sm)}
+.stat-num{font-family:var(--serif);font-style:italic;font-size:32px;color:var(--ink);line-height:1;margin-bottom:3px}
+.stat-label{font-size:11.5px;color:var(--stone);font-weight:500}
+.stat-icon{width:36px;height:36px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center}
+.stat-icon svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── BUTTONS ── */
+.ibtn{display:inline-flex;align-items:center;gap:6px;padding:8px 15px;border-radius:var(--r-sm);border:none;font-family:var(--font);font-size:13px;font-weight:500;cursor:pointer;transition:background .13s,box-shadow .13s;white-space:nowrap}
+/* No .ibtn variant had a disabled look before - buttons with inline
+   background colors (confirm/reschedule/call-slip on an appointment still
+   awaiting the student) need this to actually look greyed out rather than
+   just silently not responding to clicks. */
+.ibtn:disabled,.ibtn[disabled]{background:var(--cloud)!important;color:var(--fog)!important;border-color:var(--cloud)!important;cursor:not-allowed;box-shadow:none}
+.ibtn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.ibtn-p{background:var(--moss);color:#fff}
+.ibtn-p:hover{background:var(--pine);box-shadow:0 4px 12px rgba(30,110,67,.25)}
+.ibtn-o{background:#fff;border:1.5px solid var(--silver);color:var(--slate)}
+.ibtn-o:hover{border-color:var(--sage);color:var(--moss);background:var(--foam)}
+.ibtn-g{background:transparent;color:var(--stone)}
+.ibtn-g:hover{background:var(--cloud);color:var(--ink)}
+.ibtn-sm{padding:6px 11px;font-size:12px}
+.ibtn-amber{background:var(--amber-lt);color:var(--amber);border:1.5px solid var(--amber)}
+.ibtn-blue{background:var(--blue-lt);color:var(--blue);border:1.5px solid var(--blue)}
+
+/* ── TABLES ── */
+.itable{width:100%;border-collapse:collapse}
+.itable thead th{padding:9px 16px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--fog);background:var(--snow);border-bottom:1px solid var(--cloud);white-space:nowrap}
+.itable tbody tr{border-bottom:1px solid var(--cloud);transition:background .1s}
+.itable tbody tr:last-child{border-bottom:none}
+.itable tbody tr:hover{background:var(--foam)}
+.itable tbody td{padding:12px 16px;font-size:13px;color:var(--slate);vertical-align:middle}
+
+/* ── BADGES ── */
+.ibadge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.ibadge-high{background:var(--red-lt);color:var(--red)}
+.ibadge-medium{background:var(--amber-lt);color:var(--amber)}
+.ibadge-low{background:var(--mist);color:var(--moss)}
+.ibadge-critical{background:var(--red);color:#fff}
+.ibadge-submitted{background:var(--cloud);color:var(--stone)}
+.ibadge-acknowledged{background:var(--blue-lt);color:var(--blue)}
+.ibadge-in_review{background:var(--blue-lt);color:var(--blue)}
+.ibadge-in_progress{background:var(--mist);color:var(--moss)}
+.ibadge-scheduled{background:var(--blue-lt);color:var(--blue)}
+.ibadge-completed{background:var(--mist);color:var(--moss)}
+.ibadge-closed{background:var(--cloud);color:var(--stone)}
+.ibadge-open{background:var(--mist);color:var(--moss)}
+.ibadge-pending{background:var(--amber-lt);color:var(--amber)}
+.ibadge-expired{background:var(--red-lt);color:var(--red)}
+.ibadge-cancelled{background:var(--red-lt);color:var(--red)}
+.ibadge-cancellation_request{background:var(--red-lt);color:var(--red)}
+.ibadge-no_show{background:#fde8d7;color:#b4541a}
+.ibadge-rescheduled{background:var(--blue-lt);color:var(--blue)}
+.ibadge-callslip{background:#f3e8ff;color:#6b21a8}
+.ibadge-awaiting_testing,.ibadge-awaiting_external{background:#f3e8ff;color:#6b21a8}
+/* B#, 11/5/2026: these statuses are real values coming back from the API
+   (Referral.status can be referred_tmdu/referred_external - branch exits
+   out of the normal pipeline; Complaint.status is under_review, not the
+   retired in_review; TestingRecord.status has its own multi-step pipeline)
+   but had no matching .ibadge-<status> rule, so :class="'ibadge-'+status"
+   rendered an unstyled/blank tag wherever a view binds the class straight
+   off the raw status instead of going through its own labeled mapping. */
+.ibadge-referred_tmdu,.ibadge-referred_external{background:#f3e8ff;color:#6b21a8}
+.ibadge-under_review{background:var(--blue-lt);color:var(--blue)}
+.ibadge-fee_form_pending{background:var(--amber-lt);color:var(--amber)}
+.ibadge-or_submitted{background:var(--blue-lt);color:var(--blue)}
+.ibadge-test_administered{background:var(--mist);color:var(--moss)}
+.ibadge-awaiting_results{background:var(--amber-lt);color:var(--amber)}
+.ibadge-test_results_issued{background:var(--mist);color:var(--moss)}
+.ibadge-on_hold,.ibadge-on_observation{background:var(--amber-lt);color:var(--amber)}
+.ibadge-resolved{background:var(--mist);color:var(--moss)}
+/* Status of a Student Incident Report */
+.ir-pending{background:var(--amber-lt);color:var(--amber)}
+.ir-under_review{background:var(--blue-lt);color:var(--blue)}
+.ir-resolved{background:var(--mist);color:var(--moss)}
+.ibadge-confirmed{background:var(--mist);color:var(--moss)}
+.unit-gcu{background:var(--mist);color:var(--moss)}
+.unit-sdu{background:var(--amber-lt);color:var(--amber)}
+.unit-tmdu{background:var(--purple-lt);color:var(--purple)}
+
+/* ── FORMS ── */
+.ifl{display:block;font-size:10.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:var(--slate);margin-bottom:5px}
+.ifi,.ifse,.ifta{width:100%;border:1.5px solid var(--silver);border-radius:var(--r-sm);padding:10px 12px;font-family:var(--font);font-size:13.5px;color:var(--ink);background:var(--snow);outline:none;transition:border-color .15s,box-shadow .15s}
+.ifi:focus,.ifse:focus,.ifta:focus{border-color:var(--moss);background:#fff;box-shadow:0 0 0 3px rgba(30,110,67,.1)}
+/* Hide the browser's built-in password reveal/clear icons (Edge/IE) so only our own eye toggle shows. */
+input[type="password"]::-ms-reveal,input[type="password"]::-ms-clear{display:none}
+.ifse{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7e72' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;background-color:var(--snow);padding-right:30px;cursor:pointer}
+.ifta{resize:vertical;min-height:88px;line-height:1.6}
+
+/* ── QUEUE ROWS ── */
+.qr{display:flex;align-items:flex-start;gap:12px;padding:14px 18px;border-bottom:1px solid var(--cloud);transition:background .1s;cursor:pointer}
+.qr:last-child{border-bottom:none}
+.qr:hover{background:var(--foam)}
+.qr.uh{border-left:3px solid var(--red)}
+.qr.um{border-left:3px solid var(--amber)}
+.qr.ul{border-left:3px solid var(--sage)}
+.qav{width:36px;height:36px;border-radius:50%;background:var(--mist);color:var(--moss);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0}
+.qi{flex:1;min-width:0}
+.qn{font-size:13.5px;font-weight:600;color:var(--ink);display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.qid{font-size:11px;color:var(--fog);font-family:var(--mono);font-weight:400}
+.qmeta{font-size:11.5px;color:var(--stone);margin-top:2px}
+.qcon{font-size:12px;color:var(--slate);margin-top:4px;line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:400px}
+.qtags{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap;align-items:center}
+.qacts{display:flex;gap:6px;flex-shrink:0;align-items:flex-start;margin-top:2px}
+
+/* ── AVATAR ── */
+.iav{width:28px;height:28px;border-radius:50%;background:var(--mist);color:var(--moss);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
+
+/* ── EMPTY STATE ── */
+.empty-state{text-align:center;padding:44px 20px}
+.empty-state h3{font-size:14px;font-weight:500;color:var(--stone);margin-bottom:3px}
+.empty-state p{font-size:12px;color:var(--fog)}
+
+/* ── TOAST ── */
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);color:#fff;padding:10px 20px;border-radius:var(--r-lg);font-size:13px;font-weight:500;box-shadow:var(--sh-lg);z-index:999;opacity:0;transition:opacity .3s;white-space:nowrap;pointer-events:none}
+#toast.show{opacity:1}
+
+/* ── ANIMATIONS ── */
+@keyframes fadeUp{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+.fade-up{animation:fadeUp .22s var(--ease)}
+
+/* ── FILTER BAR ── */
+.filter-bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
+.fsm{padding:8px 28px 8px 11px;border:1.5px solid var(--silver);border-radius:var(--r-sm);font-family:var(--font);font-size:12.5px;background:#fff;outline:none;color:var(--slate);transition:border-color .15s;cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%236b7e72' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center}
+.fsm:focus{border-color:var(--moss)}
+.sin{padding:8px 12px 8px 30px;border:1.5px solid var(--silver);border-radius:var(--r-sm);font-family:var(--font);font-size:13px;background:#fff;outline:none;transition:border-color .15s,box-shadow .15s;color:var(--ink)}
+.sin:focus{border-color:var(--moss);box-shadow:0 0 0 3px rgba(30,110,67,.08)}
+.sw{position:relative}
+.sw-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:13px;height:13px;stroke:var(--fog);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+
+/* While a save/confirm/upload/submit request is in flight (see the request
+   guard in api/index.js), every button is greyed out and unclickable so
+   nothing else can be triggered until it finishes. */
+body.is-busy .ibtn,
+body.is-busy button[type="submit"]{pointer-events:none;opacity:.55;cursor:progress}
+
+/* ============ PHONE LAYOUT ============ */
+/* Tables scroll sideways inside their card instead of squeezing. */
+.ts{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.menu-btn{display:none;background:none;border:none;cursor:pointer;padding:7px;margin-left:-7px;color:var(--slate);border-radius:var(--r-sm);flex-shrink:0}
+.menu-btn svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;display:block}
+.sb-backdrop{display:none}
+.tabbar{display:none}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   VISUAL REFRESH
+   Depth, colour and texture on top of the base styles above, so every page
+   of every role changes together. BSU green stays the identity; its gold is
+   the accent. Nothing here changes layout or behaviour.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root{
+  --gold-lt:#e3f6ea;--gold-dk:#1e6e43;
+  --grad-forest:linear-gradient(135deg,#0a2114 0%,#12392a 52%,#1e6e43 100%);
+  --grad-moss:linear-gradient(135deg,#1e6e43 0%,#2e9458 100%);
+  --grad-gold:linear-gradient(90deg,#1e6e43 0%,#8fe0b0 100%);
+  --sh-card:0 1px 2px rgba(14,45,30,.05),0 10px 28px rgba(14,45,30,.07);
+}
+
+/* ── Page background: soft green and gold light instead of flat grey ── */
+.content-area,.stu-content{
+  background:
+    linear-gradient(118deg,transparent 0 30%,rgba(255,255,255,.38) 42%,transparent 56%),
+    linear-gradient(118deg,transparent 0 62%,rgba(255,255,255,.24) 74%,transparent 88%),
+    linear-gradient(160deg,#f4fbf7 0%,#edf7f1 55%,#e6f3ec 100%) !important;
+}
+
+/* The student pages scroll with the document, so their background must reach the bottom of the screen. */
+.stu-content{min-height:calc(100vh - 58px)}
+
+/* ── Sidebar ── */
+.sidebar,.stu-sidebar{background:linear-gradient(180deg,#081d12 0%,#0e2d1e 42%,#134029 100%) !important}
+.sidebar::after{background:
+  radial-gradient(ellipse 95% 34% at 50% 100%,rgba(46,148,88,.26) 0%,transparent 62%),
+  radial-gradient(ellipse 80% 22% at 0% 0%,rgba(143,224,176,.13) 0%,transparent 60%)}
+.sb-head{padding:18px 16px 16px;gap:11px;border-bottom:1px solid rgba(255,255,255,.08)}
+.sb-mark{width:40px;height:40px;border-radius:11px;padding:4px;box-shadow:0 4px 14px rgba(0,0,0,.35),0 0 0 2px rgba(143,224,176,.35)}
+.sb-brand{font-family:var(--serif);font-style:italic;font-size:22px;font-weight:400;line-height:1;letter-spacing:.3px}
+.sb-sub{font-size:9.5px;color:rgba(255,255,255,.5);letter-spacing:.9px;margin-top:4px}
+.sb-sec{color:rgba(255,255,255,.34);padding:16px 10px 6px}
+.nb{padding:10px 12px;color:rgba(255,255,255,.64);border-radius:10px;margin-bottom:2px}
+.nb:hover{background:rgba(255,255,255,.08);color:#fff}
+.nb.active{background:linear-gradient(90deg,rgba(90,184,122,.28),rgba(90,184,122,.06));color:#fff;font-weight:600;box-shadow:inset 0 0 0 1px rgba(168,216,184,.14)}
+.nb.active::before{width:3px;height:22px;background:var(--gold);box-shadow:0 0 10px rgba(143,224,176,.6)}
+.nb.active svg{color:var(--gold)}
+.sb-foot{border-top:1px solid rgba(255,255,255,.08)}
+.u-row{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:9px 10px}
+.u-av{width:32px;height:32px;background:var(--gold);color:var(--forest);font-size:11.5px;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+.u-rl{color:rgba(255,255,255,.52);font-size:10px}
+.logbtn{color:rgba(255,255,255,.45)}
+
+/* ── Top bar: a green-to-gold line under it ── */
+.topbar,.stu-topbar{border-bottom:none !important;box-shadow:0 1px 0 rgba(14,45,30,.06),0 6px 18px rgba(14,45,30,.05)}
+.topbar::after,.stu-topbar::after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg,var(--moss) 0%,var(--gold) 46%,rgba(143,224,176,0) 100%);pointer-events:none}
+.breadcrumb-nav strong{font-weight:600}
+
+/* ── Page titles ── */
+.ph h1{font-size:30px;letter-spacing:.1px}
+.ph h1::after{content:'';display:block;width:46px;height:3px;margin-top:7px;border-radius:3px;background:var(--grad-gold)}
+.ph p{margin-top:7px;font-size:13.5px}
+
+/* ── Cards ── */
+.icard{border:1px solid rgba(14,45,30,.07);box-shadow:var(--sh-card)}
+.icard-header{position:relative;padding-left:22px;background:linear-gradient(180deg,#fcfefd 0%,#f3f8f5 100%);border-bottom:1px solid #e6eeea}
+.icard-header::before{content:'';position:absolute;left:0;top:11px;bottom:11px;width:4px;border-radius:0 4px 4px 0;background:linear-gradient(180deg,var(--moss),var(--sage))}
+.icard-title{font-size:14px;font-weight:700;color:var(--forest);letter-spacing:.1px}
+
+/* ── Summary tiles: each one picks up a colour ── */
+.stat-card{position:relative;overflow:hidden;--acc:#1e6e43;border:1px solid rgba(14,45,30,.07);box-shadow:var(--sh-card);background:linear-gradient(155deg,#fff 58%,color-mix(in srgb,var(--acc) 9%,#fff) 100%);padding:18px 18px 16px}
+.stat-card::before{content:'';position:absolute;left:0;right:0;top:0;height:4px;background:linear-gradient(90deg,var(--acc),color-mix(in srgb,var(--acc) 45%,#fff))}
+.stat-card::after{content:'';position:absolute;right:-26px;bottom:-30px;width:104px;height:104px;border-radius:50%;background:var(--acc);opacity:.07;pointer-events:none}
+.stat-card:nth-child(6n+2){--acc:#0f8a8a}
+.stat-card:nth-child(6n+3){--acc:#2e9458}
+.stat-card:nth-child(6n+4){--acc:#1b6f7a}
+.stat-card:nth-child(6n+5){--acc:#3a8f6f}
+.stat-card:nth-child(6n+6){--acc:#164d30}
+.stat-card:hover{transform:translateY(-3px);box-shadow:0 2px 4px rgba(14,45,30,.06),0 16px 34px rgba(14,45,30,.11)}
+.stat-num{font-size:38px;color:var(--forest);margin-bottom:5px}
+.stat-label{font-size:12px;color:var(--slate);font-weight:600}
+.stat-icon{width:42px;height:42px;border-radius:12px;box-shadow:inset 0 0 0 1px rgba(14,45,30,.05)}
+.stat-icon svg{width:19px;height:19px}
+/* The tile's icon takes the tile's own colour, whatever the page asked for. */
+.stat-card .stat-icon{background:color-mix(in srgb,var(--acc) 13%,#fff) !important}
+.stat-card .stat-icon svg{color:var(--acc) !important}
+
+/* ── Buttons ── */
+.ibtn{border-radius:10px;font-weight:600;transition:background .13s,box-shadow .13s,transform .1s}
+.ibtn:active{transform:translateY(1px)}
+.ibtn-p{background:var(--grad-moss);box-shadow:0 2px 6px rgba(30,110,67,.28),inset 0 1px 0 rgba(255,255,255,.16)}
+.ibtn-p:hover{background:linear-gradient(135deg,#164d30 0%,#1e6e43 100%);box-shadow:0 6px 16px rgba(30,110,67,.32)}
+.ibtn-o{box-shadow:0 1px 2px rgba(14,45,30,.05)}
+.ibtn-o:hover{box-shadow:0 3px 10px rgba(30,110,67,.12)}
+
+/* ── Tables ── */
+.itable thead th{padding:11px 16px;color:var(--slate);background:linear-gradient(180deg,#f2f7f4 0%,#e9f1ec 100%);border-bottom:2px solid var(--mint)}
+.itable tbody tr:nth-child(even){background:#fafcfb}
+.itable tbody tr:hover{background:var(--foam);box-shadow:inset 3px 0 0 var(--sage)}
+
+/* ── Status labels: a small dot of their own colour ── */
+[class*="ibadge-"]{text-transform:capitalize}
+[class*="ibadge-"],.ibadge[class*=" ir-"],.ibadge[class*=" unit-"]{gap:6px;padding:3px 10px 3px 8px}
+[class*="ibadge-"]::before,.ibadge[class*=" ir-"]::before,.ibadge[class*=" unit-"]::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.8;flex-shrink:0}
+
+/* ── Forms, filters, avatars ── */
+.ifi,.ifse,.ifta{border-radius:10px;background:#fff}
+.fsm,.sin{border-radius:10px;box-shadow:0 1px 2px rgba(14,45,30,.04)}
+.iav,.qav{background:linear-gradient(135deg,#dff0e7 0%,#bfe2cd 100%);color:var(--pine);box-shadow:inset 0 0 0 1px rgba(30,110,67,.12)}
+
+/* ── Empty states: an illustration instead of bare text ── */
+.empty-state{padding:38px 20px 44px}
+.empty-state::before{content:'';display:block;width:66px;height:66px;margin:0 auto 14px;border-radius:50%;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231e6e43' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='22 12 16 12 14 15 10 15 8 12 2 12'/%3E%3Cpath d='M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z'/%3E%3C/svg%3E") center/30px no-repeat,
+    linear-gradient(135deg,#e3f2ea,#f6efd2)}
+.empty-state h3{font-size:15px;font-weight:600;color:var(--slate);margin-bottom:5px}
+.empty-state p{font-size:12.5px;color:var(--stone)}
+
+/* ── Scrollbars ── */
+.content-area::-webkit-scrollbar{width:8px}
+.content-area::-webkit-scrollbar-thumb{background:#b9d3c4;border-radius:6px;border:2px solid transparent;background-clip:padding-box}
+
+/* ── Dashboard welcome banner ── */
+.hero{position:relative;overflow:hidden;border-radius:20px;padding:24px 28px;margin-bottom:20px;color:#fff;background:var(--grad-forest);box-shadow:0 14px 34px rgba(14,45,30,.22)}
+.hero::before{content:'';position:absolute;right:-70px;top:-90px;width:300px;height:300px;border-radius:50%;background:radial-gradient(circle,rgba(143,224,176,.30),rgba(143,224,176,0) 68%);pointer-events:none}
+.hero::after{content:'';position:absolute;right:120px;bottom:-130px;width:260px;height:260px;border-radius:50%;border:34px solid rgba(255,255,255,.045);pointer-events:none}
+.hero-row{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.hero-kicker-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.hero-kicker-row .hero-kicker{margin-bottom:0}
+.hero-kicker{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;color:var(--gold);margin-bottom:8px}
+.hero h1{font-family:var(--serif);font-style:italic;font-weight:400;font-size:34px;line-height:1.12;color:#fff;margin:0}
+.hero p{margin-top:8px;font-size:13.5px;color:rgba(255,255,255,.74);max-width:560px}
+.hero-stats{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.hero-stat{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:138px;padding:11px 14px 12px;border-radius:14px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.09);color:#fff;font-family:var(--font);text-align:left;cursor:pointer;transition:background .13s,transform .12s,border-color .13s}
+.hero-stat:hover{background:rgba(255,255,255,.16);border-color:rgba(143,224,176,.55);transform:translateY(-2px)}
+.hero-stat-top{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;margin-bottom:6px}
+.hero-stat-icon{width:28px;height:28px;border-radius:8px;background:rgba(143,224,176,.18);color:var(--gold);display:flex;align-items:center;justify-content:center}
+.hero-stat-icon svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.hero-stat-period{font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.6)}
+.hero-stat-num{font-family:var(--serif);font-style:italic;font-size:32px;line-height:1;color:#fff}
+.hero-stat-label{font-size:11.5px;font-weight:600;color:rgba(255,255,255,.82)}
+.hero-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.hero-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:20px;font-size:11.5px;font-weight:600;color:#fff;background:rgba(255,255,255,.11);border:1px solid rgba(255,255,255,.15)}
+.hero-chip.hero-date{display:none}   /* computer: the date is in the top bar */
+.hero-chip svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+/* B637: the office abbreviation beside the role title - plain text, no pill
+   box, at every width (the full name is still there as a tooltip). */
+.hero-oss{font-size:11px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;color:rgba(255,255,255,.55);flex-shrink:0}
+/* B629/B632/B635/B638: Dean/Dept Chair's one-line kicker - role (still
+   uppercase via .hero-kicker above), then their full department/college
+   name and college code, in normal case so a long department name stays
+   readable instead of shouting. No box/border, same plain-text treatment
+   as .hero-oss. */
+.hero-kicker-sep{font-size:11px;color:rgba(255,255,255,.4);flex-shrink:0}
+.hero-kicker-detail{font-size:11px;font-weight:600;letter-spacing:.2px;color:rgba(255,255,255,.72);flex-shrink:0}
+.hero-actions{display:flex;gap:8px;flex-wrap:wrap}
+/* The shortcuts are one set: the same look and the same size as each other. */
+.hero-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-width:158px;padding:11px 16px;border-radius:11px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.1);color:#fff;font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;transition:background .13s,border-color .13s,transform .1s}
+.hero-btn:hover{background:rgba(255,255,255,.2);border-color:rgba(143,224,176,.6)}
+.hero-btn:active{transform:translateY(1px)}
+.hero-btn svg{width:16px;height:16px;flex-shrink:0;color:var(--gold);stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── Sign-in pages: a green gradient, with soft lighter-green shapes ── */
+.auth-page{position:relative;background:
+    radial-gradient(circle at 0% 100%,rgba(90,184,122,.20) 0,rgba(90,184,122,.20) 24%,transparent 24.2%),
+    radial-gradient(circle at 0% 100%,rgba(90,184,122,.11) 0,rgba(90,184,122,.11) 36%,transparent 36.2%),
+    radial-gradient(circle at 100% 0%,rgba(168,216,184,.20) 0,rgba(168,216,184,.20) 16%,transparent 16.2%),
+    radial-gradient(circle at 100% 0%,rgba(168,216,184,.10) 0,rgba(168,216,184,.10) 27%,transparent 27.2%),
+    radial-gradient(rgba(255,255,255,.07) 1px,transparent 1.6px) 0 0/22px 22px,
+    linear-gradient(135deg,#0a2114 0%,#134029 38%,#1e6e43 72%,#2e9458 100%) !important}
+/* The panel the sign-in content sits on: white, with a breath of mint at the corners. */
+.auth-panel{background:
+    linear-gradient(118deg,transparent 0 28%,rgba(255,255,255,.5) 44%,transparent 60%),
+    linear-gradient(160deg,#f7fcf9 0%,#ecf7f0 100%) !important;
+  border:1px solid rgba(255,255,255,.7);box-shadow:0 24px 60px rgba(0,0,0,.30) !important}
+.auth-panel .ab-org{color:var(--pine)}
+.auth-panel .ab-office{color:var(--slate)}
+/* Pale grey notes are too faint on the lime panel. */
+.auth-panel [style*="color:var(--fog)"],.auth-panel [style*="color: var(--fog)"]{color:var(--slate) !important}
+.auth-card{border-radius:20px;padding:32px 30px}
+.auth-card>.icard{box-shadow:none;border:1px solid #e1ebe5}
+.auth-page>*{position:relative;z-index:1}
+
+/* "Remember me" on the sign-in forms */
+.remember{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--slate);cursor:pointer;user-select:none}
+.remember input{width:15px;height:15px;accent-color:var(--moss);cursor:pointer}
+
+/* ── University and office seals ── */
+.logo-bsu,.logo-oss{object-fit:contain;flex-shrink:0;width:auto;background:#fff;box-shadow:0 2px 8px rgba(14,45,30,.22)}
+.logo-bsu{border-radius:50%}                 /* the BSU seal is round */
+.logo-oss{border-radius:5px;padding:1px}       /* the OSS logo is an upright rectangle */
+.sb-head{gap:9px}
+/* Same gold ring as the iCARE mark beside them. */
+.sb-logo{height:40px;padding:2px;box-shadow:0 4px 14px rgba(0,0,0,.35),0 0 0 2px rgba(143,224,176,.35)}
+.sb-logo.logo-oss{border-radius:7px}
+/* In the top bar on phones only - on desktop the sidebar carries the logos. */
+.tb-seals{display:none;align-items:center;gap:6px}
+.tb-seals img{height:28px}
+.tb-date{font-size:12px;color:var(--stone);white-space:nowrap}
+.tb-user{display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;border-radius:22px;background:var(--foam);border:1px solid #e1ece6}
+.tb-user-av{width:28px;height:28px;border-radius:50%;background:var(--grad-moss);color:#fff;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700}
+.tb-user-nm{font-size:12px;font-weight:600;color:var(--ink);line-height:1.15;white-space:nowrap}
+.tb-user-rl{font-size:10px;color:var(--stone);line-height:1.15;white-space:nowrap}
+
+/* ── Collapsible sidebar (desktop): folds to a strip of icons ── */
+.collapse-btn{display:inline-flex;background:none;border:none;cursor:pointer;padding:7px;margin-left:-7px;color:var(--stone);border-radius:var(--r-sm);flex-shrink:0;transition:background .12s,color .12s}
+.collapse-btn:hover{background:var(--cloud);color:var(--moss)}
+.collapse-btn svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+@media (min-width:861px){
+  .sidebar,.stu-sidebar{transition:width .2s var(--ease)}
+  .sb-collapsed{width:72px !important}
+  .sb-collapsed .sb-hide,.sb-collapsed .sb-logo.logo-oss{display:none !important}
+  .sb-collapsed .sb-head{justify-content:center;padding-left:8px;padding-right:8px}
+  .sb-collapsed .sb-nav{padding-left:10px;padding-right:10px}
+  .sb-collapsed .nb,.sb-collapsed .stu-nb{justify-content:center;padding:12px 0 !important}
+  .sb-collapsed .nb svg,.sb-collapsed .stu-nb svg{width:19px !important;height:19px !important}
+  .sb-collapsed .sb-sec{font-size:0;padding:0;margin:8px 10px;border-top:1px solid rgba(255,255,255,.12)}
+  .sb-collapsed .sb-sec:first-child{display:none}
+  .sb-collapsed .sb-foot{padding:10px 8px}
+  .sb-collapsed .u-row,.sb-collapsed .stu-foot{flex-direction:column;gap:8px;padding:8px 4px !important}
+  .sb-collapsed .logbtn{margin-left:0}
+}
+
+@media (max-width:860px){
+  .collapse-btn{display:none}
+  /* The menu becomes a panel that slides in from the left. */
+  .menu-btn{display:inline-flex}
+  /* Staff have the More tab at the bottom for the same menu, so no button up top. */
+  .menu-btn.has-more-tab{display:none}
+  .sidebar,.stu-sidebar{position:fixed !important;top:0;left:0;height:100vh !important;height:100dvh !important;z-index:200;transform:translateX(-105%);transition:transform .22s ease,box-shadow .22s ease;box-shadow:none;max-width:84vw}
+  /* The shadow only exists while the menu is open (it used to bleed in from the left edge). */
+  .sidebar.open,.stu-sidebar.open{transform:none;box-shadow:0 0 40px rgba(0,0,0,.35)}
+  .sb-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:190}
+
+  .topbar{padding:0 12px}
+  .tb-email{display:none}
+  .content-area{padding:14px 12px}
+  .stu-topbar{padding:12px 14px !important}
+  .stu-content{padding:14px 12px !important}
+  .ph h1{font-size:22px}
+
+  /* Side-by-side columns written inline in the pages stack into one column.
+     Grids built with repeat() (calendars, tile rows) keep their own layout. */
+  [style*="grid-template-columns"]:not([style*="repeat("]){grid-template-columns:minmax(0,1fr) !important}
+  /* A column must not stay sticky once it sits above or below its neighbour. */
+  .content-area [style*="position:sticky"],.stu-content [style*="position:sticky"],.content-area [style*="position: sticky"],.stu-content [style*="position: sticky"]{position:static !important}
+
+  /* Filters: one control per line, full width. */
+  .filter-bar>.sw,.filter-bar>.ifi,.filter-bar>input{flex:1 1 100% !important;width:100% !important;max-width:none !important}
+  .filter-bar>.fsm,.filter-bar>select{flex:1 1 calc(50% - 4px);min-width:0;width:auto !important}
+  .filter-bar .sin{width:100% !important}
+  .filter-bar>.ifi,.filter-bar>select,.filter-bar>input{max-width:none !important}
+  .filter-bar>.ibtn{flex:1 1 auto;justify-content:center}
+  .content-area input[style*="width"],.content-area select[style*="width"],.stu-content input[style*="width"],.stu-content select[style*="width"]{max-width:100%}
+
+  /* Wide tables keep readable columns and scroll within the card. */
+  .ts>.itable:not(.cards){min-width:620px}
+  .itable thead th,.itable tbody td{padding-left:12px;padding-right:12px}
+
+  /* Card headers with a title and a badge or button wrap instead of overflowing. */
+  .icard-header{flex-wrap:wrap}
+
+  /* B628 (10/30/2026): Referral Info's Edit Referral/Delete Referral group
+     (.ref-actions) - on a narrow screen there isn't room for it next to the
+     title, so it wraps onto its own line below; this makes it take the
+     full width there and gives each button an even share instead of
+     sitting left-aligned at its natural (cramped) size. */
+  .icard-header .ref-actions{width:100%;margin-left:0 !important}
+  .icard-header .ref-actions>.ibtn{flex:1 1 auto;justify-content:center}
+
+  /* 16px inputs stop iPhones from zooming the page when a field is tapped. */
+  .ifi,.ifse,.ifta,.sin,.fsm,input,select,textarea{font-size:16px !important}
+  /* Scroll hint: a soft edge shows when a table has more columns off-screen. */
+  .ts{background:
+      linear-gradient(to right,#fff 30%,rgba(255,255,255,0)) left center / 28px 100% no-repeat local,
+      linear-gradient(to left,#fff 30%,rgba(255,255,255,0)) right center / 28px 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%,rgba(0,0,0,.14),rgba(0,0,0,0)) left center / 10px 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%,rgba(0,0,0,.14),rgba(0,0,0,0)) right center / 10px 100% no-repeat scroll}
+
+  /* Grids that ask for a 340px column would overflow narrow phones. */
+  [style*="minmax(340px"]{grid-template-columns:minmax(0,1fr) !important}
+
+  /* Bigger tap targets for small buttons; keep the notch / home bar clear. */
+  .ibtn-sm{min-height:36px}
+  .content-area,.stu-content{padding-bottom:calc(14px + env(safe-area-inset-bottom)) !important}
+
+  /* Floating modals: never wider than the screen, always scrollable. */
+  /* Inline styles are read back as "position: fixed; inset: 0px" (with spaces), so both spellings are matched. */
+  [style*="position:fixed"][style*="inset:0"],[style*="position: fixed"][style*="inset: 0"]{align-items:flex-end !important;padding:0 !important}
+  [style*="position:fixed"][style*="inset:0"]>div,[style*="position: fixed"][style*="inset: 0"]>div{width:100% !important;max-width:100% !important;max-height:90vh !important;max-height:90dvh !important;overflow-y:auto;border-radius:18px 18px 0 0 !important;padding-bottom:env(safe-area-inset-bottom);animation:sheet-up .22s ease}
+
+  /* Notification panel fits the screen. */
+  .topbar [style*="width:320px"],.stu-topbar [style*="width:320px"],.topbar [style*="width: 320px"],.stu-topbar [style*="width: 320px"]{width:calc(100vw - 24px) !important;right:12px !important}
+  /* ---------- Bottom tab bar ---------- */
+  .app-shell{height:100dvh !important}
+  .tabbar{display:flex;flex:none;background:#fff;border-top:1px solid var(--cloud);box-shadow:0 -2px 12px rgba(0,0,0,.06);padding:4px 4px calc(4px + env(safe-area-inset-bottom));z-index:20}
+  .tabbar-fixed{position:fixed;left:0;right:0;bottom:0}
+  .tab{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 2px 4px;border:none;background:none;border-radius:10px;font-family:var(--font);font-size:10px;font-weight:500;letter-spacing:-.1px;color:var(--stone);text-decoration:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .tab svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .tab span{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tab.active{color:var(--moss);font-weight:600;background:var(--mist)}
+  /* The student pages scroll with the document, so they need room for the fixed bar. */
+  .stu-content{padding-bottom:calc(84px + env(safe-area-inset-bottom)) !important}
+
+  /* ---------- Tables as cards (labels come from utils/mobileTables.js) ---------- */
+  .itable.cards{display:block;width:100% !important;min-width:0 !important;margin:0 !important}
+  .itable.cards thead{display:none}
+  .itable.cards tbody{display:block}
+  .itable.cards tbody tr{display:block;padding:10px 14px}
+  .itable.cards tbody td{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;width:auto !important;padding:4px 0 !important;border:none !important;text-align:right !important;font-size:13px;white-space:normal !important;overflow-wrap:anywhere}
+  .itable.cards tbody td::before{content:attr(data-label);flex:none;max-width:42%;padding-top:2px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--fog);overflow-wrap:normal}
+  /* First value is the card's title; cells with no heading (the action buttons) take the full row. */
+  .itable.cards tbody td:first-child{font-size:14px;font-weight:600;color:var(--ink)}
+  .itable.cards tbody td[data-label=""]{justify-content:flex-end;text-align:right !important;padding-top:8px !important}
+  .itable.cards tbody td[data-label=""]::before{content:none}
+  .itable.cards tbody td[colspan]{justify-content:center;text-align:center !important}
+  .itable.cards tbody td:empty{display:none}
+  .itable.cards .iav{display:none}
+  .itable.cards tbody td>div[style*="justify-content:flex-end"]{flex-wrap:wrap}
+  /* No sideways scroll (or its edge shadows) once a table is cards. */
+  .ts:has(>.itable.cards){background:none;overflow-x:visible}
+
+  /* ---------- Refreshed shell on a phone ---------- */
+  .tb-date,.tb-user-txt,.tb-user{display:none}
+  .hero-chip.hero-date{display:inline-flex}   /* phone: the top bar has no date, so the banner shows it */
+  /* B587: "Admin · GCU Head" and the OSS label stay side by side instead of
+     wrapping underneath and looking cluttered, at any phone width. B637:
+     the label is now always just "OSS" with no box, on a computer too, so
+     there's nothing left to shrink here. */
+  .hero-kicker-row{flex-wrap:nowrap}
+  .hero-kicker-row .hero-kicker{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tb-seals{display:flex}
+  .hero{padding:18px 18px 20px;border-radius:16px}
+  .hero h1{font-size:26px}
+  /* Equal columns, icon above the name, so no button is wider than another. */
+  .hero-actions{width:100%;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px}
+  .hero-stats{display:grid;grid-template-columns:1fr 1fr}
+  .hero-stat{min-width:0}
+  /* B588: a stat card left alone in the last row (an odd count, e.g. the
+     3-card Admin/GCU/SDU dashboards) stretches across both columns instead
+     of sitting half-width with empty space beside it. */
+  .hero-stat:nth-child(odd):last-child{grid-column:1/-1}
+  .hero-btn{flex-direction:column;gap:6px;min-width:0;padding:11px 6px;font-size:11.5px;line-height:1.25;text-align:center;white-space:normal}
+  .hero-btn svg{width:18px;height:18px}
+  /* Shortcuts the tab bar already has are left out on a phone. */
+  .hero-btn.in-tabbar{display:none}
+  .hero-actions.phone-none{display:none}
+  .hero-actions.phone-one .hero-btn{flex-direction:row;gap:8px;padding:12px 16px;font-size:13px}
+  .ph h1{font-size:24px !important}
+
+  /* ---------- Bug sheet: phone layout ---------- */
+  /* B385: the main button on its own row, the others side by side under it. */
+  .form-actions{flex-wrap:wrap}
+  .form-actions>.ibtn{flex:1 1 calc(50% - 5px);justify-content:center}
+  .form-actions>.ibtn-p{flex:1 1 100%}
+  /* B386: status steps keep their full names and scroll sideways instead of being cut off. */
+  .pipe{-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .pipe::-webkit-scrollbar{display:none}
+  .pipe-step{flex:0 0 auto !important;white-space:nowrap}
+  /* B387, B388: case header - the case name never breaks mid-number; badges wrap; buttons get their own full-width row. */
+  .case-head{flex-wrap:wrap}
+  .case-name{white-space:nowrap;font-family:var(--mono) !important;font-style:normal !important;font-size:20px !important;font-weight:700 !important}
+  .case-actions{margin-left:0 !important;width:100%;flex-wrap:wrap}
+  .case-actions>.ibtn{flex:1 1 auto;justify-content:center}
+  /* B391: tab pills in one row that swipes, instead of four stacked rows. */
+  .swipe-tabs{flex-wrap:nowrap !important;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .swipe-tabs::-webkit-scrollbar{display:none}
+  .swipe-tabs>*{flex:none}
+  /* B392: a dropdown in a card header stays inside the card. */
+  .icard-header>div{min-width:0;max-width:100%;flex-wrap:wrap}
+  .icard-header .fsm,.icard-header select{max-width:100%;min-width:0}
+  /* B395: filter buttons share the row evenly. */
+  .filter-bar>.ibtn{flex:1 1 calc(50% - 4px)}
+
+  /* ---------- Small comforts ---------- */
+  .filter-bar{gap:8px}
+  .icard-body{padding:14px}
+  .ph p{font-size:12.5px}
+  .breadcrumb-nav{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ibtn{min-height:38px}
+}
+@keyframes sheet-up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
+
+/* Log out: always its own full-width row so the label never overflows (B488, B500) */
+.u-row{flex-wrap:wrap}
+.u-row > .sb-hide{flex:1;min-width:0}
+.logbtn{margin-left:0;flex:1 1 100%;width:100%;justify-content:center;align-items:center;gap:6px;padding:6px 4px;font-size:11px;letter-spacing:.2px;white-space:nowrap;border:1px solid rgba(255,255,255,.14);color:rgba(255,255,255,.75)}
+.logbtn span{font-size:11px;line-height:1}
+.stu-foot{flex-wrap:wrap}
+.stu-foot .sb-hide{min-width:0}
+.stu-logbtn{flex:1 1 100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:6px 4px;background:none;border:1px solid rgba(255,255,255,.14);border-radius:6px;color:rgba(255,255,255,.75);cursor:pointer;font-size:11px;letter-spacing:.2px;white-space:nowrap}
+.stu-logbtn:hover{background:rgba(255,255,255,.08)}
+.stu-logbtn span{font-size:11px;line-height:1}
+@media (min-width:821px){
+  .sb-collapsed .logbtn span,.sb-collapsed .stu-logbtn span{display:none}
+}
+/* Menu locked until the temporary password is changed (B495, B499) */
+.nb-locked{opacity:.38;cursor:not-allowed !important;pointer-events:auto}
+.mg-head-filter{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+/* Bug (10/25/2026): the Document Code / Revision No. / Effectivity / Ctrl
+   No. header strip, shown at the top of several forms and detail pages, is
+   hidden from view for now - the markup and its data binding stay in place
+   (still editable from Management) so it can be switched back on by
+   removing this rule, instead of re-adding the removed code later. */
+.doc-header-hidden{display:none !important}

@@ -1,0 +1,545 @@
+<template>
+  <div class="fade-up">
+    <!-- Page Header -->
+    <div class="ph" style="margin-bottom:20px">
+      <h1>Audit Trail</h1>
+      <p>Complete log of all user actions and system events for accountability.</p>
+    </div>
+
+    <!-- Filter Bar: one line on desktop (items shrink instead of wrapping); stacks on phones -->
+    <div class="filter-bar audit-bar">
+      <div class="sw ab-search">
+        <svg class="sw-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input
+          v-model="filters.search"
+          type="text"
+          class="sin"
+          placeholder="Search name or description..."
+          maxlength="100"
+          @input="onSearchInput"
+        />
+      </div>
+      <select v-model="filters.user_id" class="fsm ab-select" @change="fetchLogs()">
+        <option value="">All Users</option>
+        <option v-for="u in userList" :key="u.id" :value="u.id">{{ u.name }}</option>
+      </select>
+      <select v-model="filters.action" class="fsm ab-select" @change="fetchLogs()">
+        <option value="">All Actions</option>
+        <option v-for="a in actionList" :key="a" :value="a">{{ toTitleCase(a) }}</option>
+      </select>
+      <!-- From - To in one box -->
+      <div class="ab-range" title="Date range">
+        <input v-model="filters.date_from" type="date" title="From date" :max="filters.date_to || undefined" @change="fetchLogs()" />
+        <span>–</span>
+        <input v-model="filters.date_to" type="date" title="To date" :min="filters.date_from || undefined" @change="fetchLogs()" />
+      </div>
+      <button class="ibtn ibtn-g ibtn-sm ab-btn" @click="resetFilters">Reset</button>
+      <!-- One "Export as" button; picking a format downloads it right away -->
+      <div ref="exportMenuEl" class="ab-export">
+        <button class="ibtn ibtn-o ibtn-sm ab-btn" :disabled="exporting" @click="exportMenuOpen = !exportMenuOpen">
+          <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          {{ exporting ? `Exporting ${exportFormat === 'pdf' ? 'PDF' : 'Excel'}...` : 'Export as' }}
+          <svg v-if="!exporting" viewBox="0 0 24 24" style="width:12px;height:12px"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div v-if="exportMenuOpen" class="export-menu">
+          <button type="button" @click="exportAs('pdf')"><strong>PDF</strong><small>Ready to print</small></button>
+          <button type="button" @click="exportAs('excel')"><strong>Excel</strong><small>Editable spreadsheet</small></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Account Activity: sign-ins, failed attempts and other access events
+         for the dates / user picked above. Clicking a figure filters the log. -->
+    <div class="icard aa-card">
+      <div class="aa-head">
+        <span class="icard-title">Account Activity</span>
+        <span class="aa-range">{{ summaryRangeLabel }}</span>
+      </div>
+      <div class="aa-grid">
+        <button v-for="t in activityTiles" :key="t.label" type="button" class="aa-tile" :class="{ warn: t.warn && t.value > 0, on: t.action && filters.action === t.action, plain: !t.action }" :title="t.hint" @click="t.action && filterByAction(t.action)">
+          <span class="aa-num">{{ t.value }}</span>
+          <span class="aa-label">{{ t.label }}</span>
+        </button>
+      </div>
+      <div v-if="summary.failed_by_account?.length" class="aa-failed">
+        <div class="aa-sub">Failed sign-in attempts, most repeated first</div>
+        <div v-for="f in summary.failed_by_account" :key="f.what" class="aa-row">
+          <span class="aa-what">{{ f.what }}</span>
+          <span class="aa-meta">{{ f.count }}× · last {{ f.last_at }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Audit Log Table -->
+    <div class="icard">
+      <div v-if="loading" style="text-align:center;padding:44px">
+        <div style="width:24px;height:24px;border:2px solid var(--mint);border-top-color:var(--moss);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto"></div>
+      </div>
+      <div v-else-if="logs.length === 0" class="empty-state">
+        <h3>No audit logs found</h3>
+        <p>Try adjusting your search or filters.</p>
+      </div>
+      <div class="ts" v-else>
+        <table class="itable">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>User</th>
+              <th>Role</th>
+              <th>Action</th>
+              <th>Description</th>
+              <th>IP Address</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="log in logs"
+              :key="log.id"
+              style="cursor:pointer"
+              @click="openLog(log)"
+            >
+              <td style="font-family:var(--mono);font-size:11px;white-space:nowrap">{{ formatTimestamp(log.created_at) }}</td>
+              <td>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div class="iav" style="width:24px;height:24px;font-size:9px">{{ initials(log.user_name) }}</div>
+                  <div style="font-size:13px;font-weight:500">{{ log.user_name }}</div>
+                </div>
+              </td>
+              <td>
+                <span class="ibadge" style="font-size:10px" :style="roleStyle(log.user_role)">{{ roleLabel(log.user_role) }}</span>
+              </td>
+              <td>
+                <span class="ibadge" :style="actionStyle(log.action)">{{ toTitleCase(log.action) }}</span>
+              </td>
+              <td style="font-size:12px;color:var(--slate);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ log.description }}</td>
+              <td style="font-family:var(--mono);font-size:11px;color:var(--fog)">{{ log.ip_address }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div v-if="pagination.total > 0" style="padding:12px 18px;border-top:1px solid var(--cloud);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <span style="font-size:12px;color:var(--stone)">
+          Showing {{ pagination.from }}-{{ pagination.to }} of {{ pagination.total }}
+        </span>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <select v-model.number="perPage" class="fsm" style="width:auto" title="Rows per page" @change="fetchLogs()">
+            <option v-for="n in [10, 25, 50, 100]" :key="n" :value="n">{{ n }} / page</option>
+          </select>
+          <template v-if="pagination.last_page > 1">
+            <button class="ibtn ibtn-o ibtn-sm" :disabled="pagination.current_page === 1" @click="changePage(1)">First</button>
+            <button class="ibtn ibtn-o ibtn-sm" :disabled="pagination.current_page === 1" @click="changePage(pagination.current_page - 1)">Prev</button>
+            <template v-for="(p, i) in pageList" :key="i">
+              <span v-if="p === '...'" style="padding:0 4px;color:var(--fog)">…</span>
+              <button v-else class="ibtn ibtn-sm" :class="p === pagination.current_page ? 'ibtn-p' : 'ibtn-o'" @click="changePage(p)">{{ p }}</button>
+            </template>
+            <button class="ibtn ibtn-o ibtn-sm" :disabled="pagination.current_page === pagination.last_page" @click="changePage(pagination.current_page + 1)">Next</button>
+            <button class="ibtn ibtn-o ibtn-sm" :disabled="pagination.current_page === pagination.last_page" @click="changePage(pagination.last_page)">Last</button>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log Detail Drawer -->
+    <div v-if="selectedLog" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60" @click.self="selectedLog = null">
+      <div style="position:fixed;top:0;right:0;width:min(480px,100vw);height:100vh;background:#fff;overflow-y:auto;box-shadow:-6px 0 40px rgba(0,0,0,.18)">
+        <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1">
+          <div style="font-size:15px;font-weight:600;color:var(--ink)">Log Entry #{{ selectedLog.id }}</div>
+          <button class="ibtn ibtn-g ibtn-sm" @click="selectedLog = null">✕</button>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+          <div>
+            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Timestamp</div>
+            <div style="font-family:var(--mono);font-size:13px">{{ formatTimestamp(selectedLog.created_at) }}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">User</div>
+            <div style="font-size:13px;font-weight:500">{{ selectedLog.user_name }}</div>
+            <div style="font-size:11px;color:var(--stone)">{{ roleLabel(selectedLog.user_role) }}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Action</div>
+            <span class="ibadge" :style="actionStyle(selectedLog.action)">{{ toTitleCase(selectedLog.action) }}</span>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Description</div>
+            <div style="font-size:13px;color:var(--ink);line-height:1.6">{{ selectedLog.description }}</div>
+          </div>
+          <div v-if="selectedLog.model_type">
+            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">Affected Record</div>
+            <div style="font-size:13px;color:var(--ink)">{{ recordLabel(selectedLog.model_type) }}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:3px">IP Address</div>
+            <div style="font-family:var(--mono);font-size:13px">{{ selectedLog.ip_address }}</div>
+          </div>
+          <!-- What changed: one row per field, old value beside new. Passwords are never listed. -->
+          <div v-if="changeRows.length">
+            <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog);margin-bottom:6px">Changes Made</div>
+            <div class="chg">
+              <div class="chg-head"><span>Field</span><span>Before</span><span>After</span></div>
+              <div v-for="row in changeRows" :key="row.field" class="chg-row">
+                <span class="chg-field">{{ row.label }}</span>
+                <span class="chg-old">{{ row.before }}</span>
+                <span class="chg-new">{{ row.after }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted, onBeforeUnmount, inject } from 'vue';
+import axios from 'axios';
+import { auditAPI } from '../../api/index';
+import { toTitleCase, localDateStr } from '../../utils/validators';
+
+const toast = inject('toast');
+const API_BASE = `${import.meta.env.VITE_API_URL || ''}/api`;
+function authHeaders() {
+  return { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+}
+
+const exportFormat = ref('pdf');
+const exporting    = ref(false);
+const exportMenuOpen = ref(false);
+const exportMenuEl   = ref(null);
+
+function exportAs(format) {
+  exportFormat.value = format;
+  exportMenuOpen.value = false;
+  exportLogs();
+}
+
+// Clicking anywhere outside the menu closes it.
+function closeExportMenu(e) {
+  if (exportMenuOpen.value && exportMenuEl.value && !exportMenuEl.value.contains(e.target)) {
+    exportMenuOpen.value = false;
+  }
+}
+onMounted(() => document.addEventListener('click', closeExportMenu));
+onBeforeUnmount(() => document.removeEventListener('click', closeExportMenu));
+
+async function exportLogs() {
+  exporting.value = true;
+  try {
+    const res = await axios.get(`${API_BASE}/audit-logs/export/${exportFormat.value}`, {
+      ...authHeaders(),
+      params: { ...filters.value },
+      responseType: 'blob',
+    });
+    const ext = exportFormat.value === 'pdf' ? 'pdf' : 'xlsx';
+    const blobUrl = window.URL.createObjectURL(new Blob([res.data]));
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = `iCARE-Audit-Trail-${localDateStr()}.${ext}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(blobUrl);
+  } catch (e) {
+    toast?.error('Failed to export audit log.');
+  } finally {
+    exporting.value = false;
+  }
+}
+
+const loading     = ref(true);
+const logs        = ref([]);
+const pagination  = ref({});
+const perPage     = ref(50);
+// 1 … 4 5 6 … 20: the first, last and nearby pages.
+const pageList = computed(() => {
+  const cur = pagination.value.current_page || 1;
+  const last = pagination.value.last_page || 1;
+  const out = [];
+  for (let i = 1; i <= last; i++) {
+    if (i === 1 || i === last || Math.abs(i - cur) <= 1) out.push(i);
+    else if (out[out.length - 1] !== '...') out.push('...');
+  }
+  return out;
+});
+const selectedLog = ref(null);
+const userList    = ref([]);
+const actionList  = ref([]);
+const emptyFilters = () => ({ search: '', user_id: '', action: '', date_from: '', date_to: '' });
+const filters     = ref(emptyFilters());
+
+// Only the latest request may update the table - a slow earlier search must
+// not overwrite the results of a newer one.
+let requestSeq = 0;
+
+async function fetchLogs(page = 1) {
+  const seq = ++requestSeq;
+  loading.value = true;
+  if (page === 1) fetchSummary();
+  try {
+    const res = await auditAPI.index({ ...filters.value, per_page: perPage.value, page });
+    if (seq !== requestSeq) return;
+    logs.value       = res.data.data;
+    pagination.value = res.data;
+  } catch (e) {
+    console.error(e);
+  } finally {
+    if (seq === requestSeq) loading.value = false;
+  }
+}
+
+// ---- Account Activity overview ----
+// Follows the date and user filters only; the action filter and the search
+// box narrow the list below, not these totals.
+const summary = ref({});
+async function fetchSummary() {
+  const { user_id, date_from, date_to } = filters.value;
+  try {
+    const res = await axios.get(`${API_BASE}/audit-logs/summary`, { ...authHeaders(), params: { user_id, date_from, date_to } });
+    summary.value = res.data || {};
+  } catch (e) {
+    summary.value = {};
+  }
+}
+
+const activityTiles = computed(() => [
+  { label: 'Successful Sign-ins',   value: summary.value.logins ?? 0,           action: 'login',           hint: 'Show sign-ins in the list below' },
+  { label: 'Failed Sign-in Attempts', value: summary.value.failed_logins ?? 0,  action: 'login_failed',    hint: 'Show failed sign-in attempts in the list below', warn: true },
+  { label: 'Accounts That Signed In', value: summary.value.active_accounts ?? 0, hint: 'Different staff and student accounts that signed in' },
+  { label: 'Password Changes',      value: summary.value.password_changes ?? 0, action: 'password_change', hint: 'Show password changes in the list below' },
+  { label: 'Records Viewed',        value: summary.value.records_viewed ?? 0,   action: 'viewed',          hint: 'Show record views in the list below' },
+  { label: 'All Events',            value: summary.value.total_events ?? 0,     hint: 'Every action recorded in this range' },
+]);
+
+const summaryRangeLabel = computed(() => {
+  const { date_from, date_to } = filters.value;
+  const nice = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  if (date_from && date_to) return `${nice(date_from)} – ${nice(date_to)}`;
+  if (date_from) return `Since ${nice(date_from)}`;
+  if (date_to) return `Up to ${nice(date_to)}`;
+  return 'All dates';
+});
+
+// Clicking a figure filters the list to that action; clicking it again clears it.
+function filterByAction(action) {
+  filters.value.action = filters.value.action === action ? '' : action;
+  fetchLogs();
+}
+
+let searchTimer = null;
+function onSearchInput() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => fetchLogs(), 400);
+}
+
+// Dropdown choices come from the log itself, so every recorded action and
+// every user with activity can be filtered on. The core account actions are
+// always offered, even before the first such entry exists.
+const BASE_ACTIONS = ['login', 'login_failed', 'logout', 'password_change', 'profile_updated', 'created', 'updated', 'deleted', 'viewed'];
+async function fetchFilterOptions() {
+  try {
+    const res = await auditAPI.filterOptions();
+    userList.value   = res.data.users || [];
+    actionList.value = [...new Set([...BASE_ACTIONS, ...(res.data.actions || [])])].sort();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function openLog(log) { selectedLog.value = log; }
+
+// The API sends timestamps in UTC; show them as local date and time.
+function formatTimestamp(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (isNaN(d)) return value;
+  return `${localDateStr(d)} ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+}
+
+function changePage(page) {
+  fetchLogs(page);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function resetFilters() {
+  clearTimeout(searchTimer);
+  filters.value = emptyFilters();
+  fetchLogs();
+}
+
+function actionStyle(action) {
+  const styles = {
+    login:          'background:var(--mist);color:var(--moss)',
+    login_failed:   'background:var(--red-lt);color:var(--red)',
+    logout:       'background:var(--cloud);color:var(--stone)',
+    created:        'background:var(--blue-lt);color:var(--blue)',
+    updated:        'background:var(--amber-lt);color:var(--amber)',
+    deleted:        'background:var(--red-lt);color:var(--red)',
+    viewed:         'background:var(--cloud);color:var(--stone)',
+    acknowledged:   'background:var(--mist);color:var(--moss)',
+    assigned:       'background:var(--blue-lt);color:var(--blue)',
+    status_updated: 'background:var(--amber-lt);color:var(--amber)',
+    closed:         'background:var(--cloud);color:var(--stone)',
+    exported:       'background:var(--purple-lt);color:var(--purple)',
+    report_sent:    'background:var(--purple-lt);color:var(--purple)',
+  };
+  return styles[action] || 'background:var(--cloud);color:var(--stone)';
+}
+
+// What kind of record an entry is about, in plain words. The log stores the
+// internal class name and database id ("App\Models\Student #5006"), which is
+// not shown: it means nothing to a reader, and the description already says
+// which student or referral it was.
+function recordLabel(modelType) {
+  const name = String(modelType || '').split('\\').pop();
+  const labels = {
+    Student:          'Student record',
+    User:             'User account',
+    Referral:         'Referral',
+    CaseFile:         'Student Information File',
+    Appointment:      'Appointment',
+    TestingRecord:    'Testing record',
+    SessionNote:      'Session note',
+    CaseIntervention: 'Case intervention',
+    FeedbackSlip:     'Feedback slip',
+    Complaint:        'Complaint',
+  };
+  // Any other record type: "ParentConferenceSlip" -> "Parent Conference Slip"
+  return labels[name] || name.replace(/([a-z])([A-Z])/g, '$1 $2');
+}
+
+// ---- What an entry changed ----
+// Entries that edit a record carry its values before and after. Only the
+// fields that actually differ are listed, and never anything secret.
+const HIDDEN_FIELDS = ['password', 'temp_password', 'remember_token', 'created_at', 'updated_at', 'deleted_at', 'id'];
+function showValue(v) {
+  if (v === null || v === undefined || v === '') return '(blank)';
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
+const changeRows = computed(() => {
+  const before = selectedLog.value?.old_values || {};
+  const after  = selectedLog.value?.new_values || {};
+  if (Array.isArray(before) || Array.isArray(after)) return [];
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter(k => !HIDDEN_FIELDS.includes(k) && showValue(before[k]) !== showValue(after[k]))
+    .map(k => ({ field: k, label: toTitleCase(k), before: showValue(before[k]), after: showValue(after[k]) }));
+});
+
+function roleLabel(role) {
+  const labels = {
+    admin:          'Admin / GCU Head',
+    gcu_staff:      'GCU Staff',
+    sdu_head:       'SDU Head',
+    tmdu_staff:     'TMDU Staff',
+    faculty:        'Faculty',
+    dean_secretary: 'Dean',
+    tmdu_head:      'TMDU Head',
+    system_admin:   'System Admin',
+    student:        'Student',
+  };
+  return labels[role] || role;
+}
+
+function roleStyle(role) {
+  const styles = {
+    admin:          'background:#1a1a2e;color:#fff',
+    gcu_staff:      'background:var(--mist);color:var(--moss)',
+    sdu_head:       'background:var(--amber-lt);color:var(--amber)',
+    tmdu_staff:     'background:var(--purple-lt);color:var(--purple)',
+    faculty:        'background:var(--blue-lt);color:var(--blue)',
+    dean_secretary: 'background:var(--cloud);color:var(--stone)',
+    tmdu_head:      'background:var(--purple-lt);color:var(--purple)',
+  };
+  return styles[role] || '';
+}
+
+function initials(name) {
+  return name?.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() || '?';
+}
+
+onMounted(() => {
+  fetchLogs();
+  fetchFilterOptions();
+});
+</script>
+<style scoped>
+/* Changes Made table in the entry popup */
+.chg { border: 1px solid var(--cloud); border-radius: var(--r-sm); overflow: hidden; font-size: 12.5px; }
+.chg-head, .chg-row { display: grid; grid-template-columns: 1fr 1.2fr 1.2fr; gap: 10px; padding: 7px 12px; }
+.chg-head { background: var(--snow); font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--fog); }
+.chg-row { border-top: 1px solid var(--cloud); overflow-wrap: anywhere; }
+.chg-field { font-weight: 600; color: var(--ink); }
+.chg-old { color: var(--stone); text-decoration: line-through; }
+.chg-new { color: var(--moss); font-weight: 600; }
+/* Account Activity overview */
+.aa-card { margin-bottom: 16px; padding: 14px 18px 16px; }
+.aa-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.aa-range { font-size: 12px; color: var(--stone); }
+.aa-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.aa-tile {
+  display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; text-align: left;
+  background: var(--snow); border: 1px solid var(--cloud); border-radius: var(--r-sm);
+  font-family: var(--font); cursor: pointer; transition: border-color .12s, background .12s;
+}
+.aa-tile:hover { border-color: var(--moss); }
+.aa-tile.plain { cursor: default; }
+.aa-tile.plain:hover { border-color: var(--cloud); }
+.aa-tile.on { background: var(--mist); border-color: var(--moss); }
+.aa-tile.warn { background: var(--red-lt); border-color: #f5c0c0; }
+.aa-tile.warn .aa-num { color: var(--red); }
+.aa-num { font-family: var(--serif); font-style: italic; font-size: 24px; line-height: 1; color: var(--ink); font-weight: 700; }
+.aa-label { font-size: 11px; color: var(--stone); font-weight: 500; }
+.aa-failed { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--cloud); }
+.aa-sub { font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--fog); margin-bottom: 6px; }
+.aa-row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 12.5px; color: var(--ink); }
+.aa-what { min-width: 0; }
+.aa-meta { flex: none; color: var(--stone); font-size: 12px; white-space: nowrap; }
+@media (max-width: 1100px) { .aa-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 560px)  { .aa-grid { grid-template-columns: repeat(2, 1fr); } .aa-row { flex-direction: column; gap: 0; } }
+/* Desktop: everything stays on one line - the search box takes the spare
+   room and gives it up first, the rest shrink a little before anything wraps. */
+.audit-bar { flex-wrap: nowrap; }
+.ab-search { flex: 1 1 200px; min-width: 130px; }
+.ab-search .sin { width: 100%; }
+.ab-select { flex: 0 1 140px; min-width: 100px; }
+.ab-range {
+  flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 4px;
+  padding: 0 8px; height: 36px; background: #fff;
+  border: 1.5px solid var(--silver); border-radius: var(--r-sm);
+}
+.ab-range:focus-within { border-color: var(--moss); }
+.ab-range input {
+  border: none; outline: none; background: none; min-width: 0; width: 118px;
+  font-family: var(--font); font-size: 12.5px; color: var(--ink);
+}
+.ab-range span { color: var(--fog); font-size: 12px; }
+.ab-btn { flex: none; white-space: nowrap; }
+.ab-export { position: relative; flex: none; margin-left: auto; }
+
+.export-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
+  min-width: 180px; padding: 5px;
+  background: #fff; border: 1px solid var(--cloud); border-radius: var(--r-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .12);
+}
+.export-menu button {
+  display: block; width: 100%; padding: 7px 10px; border: none; background: none;
+  border-radius: 6px; font-family: var(--font); text-align: left; cursor: pointer;
+}
+.export-menu button:hover { background: var(--mist); }
+.export-menu strong { display: block; font-size: 12.5px; color: var(--ink); font-weight: 600; }
+.export-menu small { display: block; font-size: 11px; color: var(--stone); }
+
+/* Phones keep the existing stacked layout. */
+@media (max-width: 860px) {
+  .audit-bar { flex-wrap: wrap; }
+  .ab-search, .ab-select, .ab-range { flex: 1 1 100%; }
+  .ab-range input { flex: 1; width: auto; }
+  .ab-export { margin-left: 0; flex: 1 1 auto; }
+  .ab-export > .ibtn { width: 100%; justify-content: center; }
+}
+</style>

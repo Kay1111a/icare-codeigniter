@@ -1,0 +1,769 @@
+<template>
+  <div class="fade-up">
+    <!-- Page Header -->
+    <div class="ph" style="margin-bottom:20px">
+      <h1>Faculty Profile</h1>
+      <p v-if="isDean">View and manage faculty of {{ auth.user?.college }}. Assign the Department Chair of each department.</p>
+      <p v-else-if="isChair">View and manage faculty of {{ auth.user?.department }}.</p>
+      <p v-else>View and manage faculty member accounts.</p>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+      <div class="sw">
+        <svg class="sw-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input
+          v-model="search"
+          type="text"
+          class="sin"
+          maxlength="15"
+          placeholder="Search name, email, or employee ID..."
+          style="width:220px"
+          @keypress="blockSpecialKeypress"
+          @input="onSearch"
+        />
+      </div>
+      <select v-model="statusFilter" class="fsm" @change="page = 1; fetchItems()">
+        <option value="">Sort by Status</option>
+        <option value="1">Active</option>
+        <option value="0">Inactive</option>
+      </select>
+      <select v-if="!isChair" v-model="deptFilter" class="fsm" @change="page = 1; fetchItems()">
+        <option value="">All Departments</option>
+        <option v-for="d in departments" :key="d" :value="d">{{ d }}</option>
+      </select>
+      <select v-model="sortOption" class="fsm" @change="page = 1; fetchItems()">
+        <option value="created_at:desc">Newest First</option>
+        <option value="created_at:asc">Oldest First</option>
+        <option value="employee_id:asc">Employee ID: Ascending</option>
+        <option value="employee_id:desc">Employee ID: Descending</option>
+        <option value="last_name:asc">Name: A-Z</option>
+        <option value="last_name:desc">Name: Z-A</option>
+      </select>
+      <button class="ibtn ibtn-o ibtn-sm" @click="resetFilters">Reset</button>
+      <button class="ibtn ibtn-o ibtn-sm" @click="openUpload">
+        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Upload Faculty
+      </button>
+      <button class="ibtn ibtn-p ibtn-sm" style="margin-left:auto" @click="openForm(null)">
+        <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Faculty
+      </button>
+    </div>
+
+    <!-- Faculty Table -->
+    <div class="icard">
+      <div v-if="loading" style="text-align:center;padding:44px">
+        <div style="width:24px;height:24px;border:2px solid var(--mint);border-top-color:var(--moss);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto"></div>
+      </div>
+      <div v-else-if="!items.length" class="empty-state">
+        <h3>No faculty found</h3>
+        <p>Try adjusting your search or filters, or add a faculty member / upload a masterlist (CSV / Excel).</p>
+      </div>
+      <div class="ts" v-else>
+        <table class="itable">
+          <thead>
+            <tr>
+              <th>Employee ID</th>
+              <!-- B610: the Employee ID alone didn't say who it belonged to
+                   without opening the profile - Full Name sits right beside it. -->
+              <th>Full Name</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in items" :key="u.id" :style="!u.is_active ? 'opacity:0.55;background:var(--snow)' : ''">
+              <td style="font-family:var(--mono);font-size:13px;font-weight:600;cursor:pointer" @click="openView(u)">{{ u.employee_id || '-' }}</td>
+              <td style="cursor:pointer" @click="openView(u)">{{ u.last_name }}, {{ u.first_name }}{{ u.middle_name ? ' ' + u.middle_name : '' }}</td>
+              <td>
+                <span class="ibadge" :style="u.is_active ? 'background:var(--mist);color:var(--moss)' : 'background:var(--cloud);color:var(--ink);border:1px solid var(--fog)'">
+                  {{ u.is_active ? 'Active' : 'Inactive' }}
+                </span>
+              </td>
+              <td>
+                <div style="display:flex;gap:6px;justify-content:flex-end">
+                  <button class="ibtn ibtn-o ibtn-sm" @click="openView(u)">View</button>
+                  <button
+                    class="ibtn ibtn-sm"
+                    :style="u.is_active ? 'background:var(--red-lt);color:var(--red);border:1.5px solid #f5c0c0' : 'background:var(--mint);color:var(--forest);border:1.5px solid var(--moss)'"
+                    @click="askAction('toggle', u, (u.is_active ? 'Deactivate ' : 'Activate ') + u.name + '?')"
+                  >
+                    {{ u.is_active ? 'Deactivate' : 'Activate' }}
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div v-if="lastPage > 1" style="padding:12px 18px;border-top:1px solid var(--cloud);display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:12px;color:var(--stone)">Showing {{ pageFrom }}-{{ pageTo }} of {{ total }}</span>
+        <div style="display:flex;gap:6px">
+          <button class="ibtn ibtn-o ibtn-sm" :disabled="page <= 1" @click="page--; fetchItems()">Prev</button>
+          <button class="ibtn ibtn-o ibtn-sm" :disabled="page >= lastPage" @click="page++; fetchItems()">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- View Faculty Profile Modal -->
+    <div v-if="viewTarget" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="viewTarget = null">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:480px;overflow:hidden;box-shadow:var(--sh-lg);max-height:90vh;overflow-y:auto">
+        <div style="background:linear-gradient(135deg,var(--forest),var(--pine));padding:22px;border-radius:var(--r-lg) var(--r-lg) 0 0;text-align:center">
+          <div style="width:56px;height:56px;border-radius:50%;background:var(--gold);color:var(--forest);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;margin:0 auto 10px">
+            {{ initials(viewTarget.first_name, viewTarget.last_name) }}
+          </div>
+          <div style="font-size:15px;font-weight:600;color:#fff">{{ viewTarget.last_name }}, {{ viewTarget.first_name }} {{ viewTarget.middle_name }} {{ viewTarget.suffix }}</div>
+          <div style="font-size:11px;color:rgba(255,255,255,.6);margin-top:2px">{{ viewTarget.email }}</div>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:12px">
+          <div>
+            <div class="vlabel">Employee ID</div>
+            <div style="font-size:13px;color:var(--ink);font-family:var(--mono)">{{ viewTarget.employee_id || '-' }}</div>
+          </div>
+          <div>
+            <div class="vlabel">Role</div>
+            <span class="ibadge" :style="viewTarget.role === 'dept_chair' ? 'background:var(--amber-lt);color:var(--amber)' : 'background:var(--blue-lt);color:var(--blue)'">
+              {{ viewTarget.role === 'dept_chair' ? 'Dept Chair' : 'Faculty' }}
+            </span>
+          </div>
+          <div v-if="viewTarget.college">
+            <div class="vlabel">College</div>
+            <div style="font-size:13px;color:var(--ink)">{{ viewTarget.college }}</div>
+          </div>
+          <div v-if="viewTarget.department">
+            <div class="vlabel">Department</div>
+            <div style="font-size:13px;color:var(--ink)">{{ viewTarget.department }}</div>
+          </div>
+          <div v-if="viewTarget.contact_number">
+            <div class="vlabel">Contact Number</div>
+            <div style="font-size:13px;color:var(--ink)">{{ viewTarget.contact_number }}</div>
+          </div>
+          <div>
+            <div class="vlabel">Status</div>
+            <span class="ibadge" :style="viewTarget.is_active ? 'background:var(--mist);color:var(--moss)' : 'background:var(--cloud);color:var(--stone)'">
+              {{ viewTarget.is_active ? 'Active' : 'Inactive' }}
+            </span>
+          </div>
+          <div>
+            <div class="vlabel">Last Login</div>
+            <div style="font-size:13px;color:var(--ink)">{{ viewTarget.last_login_at ? new Date(viewTarget.last_login_at).toLocaleDateString() : 'Never' }}</div>
+          </div>
+
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="ibtn ibtn-p" :disabled="!viewTarget.is_active" :style="{ flex:1, justifyContent:'center', opacity: viewTarget.is_active ? 1 : .5 }" @click="editFromView">Edit</button>
+            <button class="ibtn ibtn-g" style="flex:1;justify-content:center" @click="viewTarget = null">Close</button>
+          </div>
+          <button v-if="isDean && viewTarget.role === 'faculty'" class="ibtn ibtn-o ibtn-sm" style="width:100%;justify-content:center" :disabled="!viewTarget.is_active" @click="chairFromView">Make Dept Chair</button>
+          <button v-if="isDean && viewTarget.role === 'dept_chair'" class="ibtn ibtn-o ibtn-sm" style="width:100%;justify-content:center" @click="askFromView('removeChair', 'Remove ' + viewTarget.name + ' as Department Chair?')">Remove Chair</button>
+          <button
+            class="ibtn ibtn-sm"
+            :disabled="!viewTarget.is_active"
+            :style="{ width:'100%', justifyContent:'center', background:'var(--amber-lt)', color:'var(--amber)', border:'1.5px solid var(--amber)', opacity: viewTarget.is_active ? 1 : .5 }"
+            @click="askFromView('reset', 'Reset the password of ' + viewTarget.name + '?')"
+          >Reset Password</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add / Edit modal -->
+    <div v-if="formOpen" class="fmodal" @click.self="formOpen = false">
+      <div class="fbox">
+        <div class="fhead"><span>{{ editing ? 'Edit Faculty' : 'Add Faculty' }}</span></div>
+        <div class="fbody">
+          <div class="grid2">
+            <!-- Same labels, order and examples as User Management's Add Employee;
+                 B612/B613: Employee ID is numeric-only with the same 15-character
+                 limit used there too. -->
+            <div>
+              <label class="ifl">Employee ID</label>
+              <input v-model="form.employee_id" class="ifi" maxlength="15" placeholder="e.g. 12345" inputmode="numeric"
+                :style="employeeIdDuplicate ? 'border-color:var(--red);border-width:1.5px' : ''"
+                @input="form.employee_id = onlyDigits(form.employee_id); queueDuplicateCheck()" />
+              <!-- B638: checked live as the Dean/Dept Chair types, not just at submit. -->
+              <div v-if="employeeIdDuplicate" style="font-size:11px;color:var(--red);margin-top:4px">Employee ID already exists. Please enter a unique Employee ID.</div>
+            </div>
+            <div>
+              <label class="ifl">Last Name <span style="color:var(--red)">*</span></label>
+              <input v-model="form.last_name" class="ifi" placeholder="Reyes" maxlength="50"
+                :style="nameDuplicate ? 'border-color:var(--red);border-width:1.5px' : ''"
+                @input="form.last_name = capitalizeFirst(onlyLetters(form.last_name)); queueDuplicateCheck()" />
+              <div v-if="nameDuplicate" style="font-size:11px;color:var(--red);margin-top:4px">A faculty member with this name already exists.</div>
+            </div>
+            <div>
+              <label class="ifl">First Name <span style="color:var(--red)">*</span></label>
+              <input v-model="form.first_name" class="ifi" placeholder="Maria" maxlength="50"
+                :style="nameDuplicate ? 'border-color:var(--red);border-width:1.5px' : ''"
+                @input="form.first_name = capitalizeFirst(onlyLetters(form.first_name)); queueDuplicateCheck()" />
+            </div>
+            <div><label class="ifl">Middle Name</label><input v-model="form.middle_name" class="ifi" placeholder="Santos" maxlength="50" @input="form.middle_name = capitalizeFirst(onlyLetters(form.middle_name)); queueDuplicateCheck()" /></div>
+            <div><label class="ifl">Suffix</label>
+              <select v-model="form.suffix" class="ifse">
+                <option value="">None</option>
+                <option v-if="form.suffix && !SUFFIX_OPTIONS.includes(form.suffix)" :value="form.suffix">{{ form.suffix }}</option>
+                <option v-for="x in SUFFIX_OPTIONS" :key="x" :value="x">{{ x }}</option>
+              </select></div>
+            <div>
+              <label class="ifl">Email Address <span style="color:var(--red)">*</span></label>
+              <input v-model="form.email" type="email" class="ifi" placeholder="name@bsu.edu.ph" :style="(emailProblem || emailDuplicate) ? 'border-color:var(--red);border-width:1.5px' : ''" @input="queueDuplicateCheck()" />
+              <div v-if="emailProblem" style="font-size:11px;color:var(--red);margin-top:4px">{{ emailProblem }}</div>
+              <div v-else-if="emailDuplicate" style="font-size:11px;color:var(--red);margin-top:4px">This email address is already in use.</div>
+            </div>
+            <div v-if="needsCollegePick && !editing">
+              <label class="ifl">College <span style="color:var(--red)">*</span></label>
+              <select v-model="form.college" class="ifse" @change="form.department = ''">
+                <option value="">Select college</option>
+                <option v-for="c in colleges" :key="c.id" :value="c.name">{{ c.name }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="ifl">Department <span style="color:var(--red)">*</span></label>
+              <input v-if="isChair" :value="auth.user?.department" class="ifi" disabled />
+              <select v-else v-model="form.department" class="ifse" :disabled="needsCollegePick && !editing && !form.college">
+                <option value="">{{ needsCollegePick && !editing && !form.college ? 'Select a college first' : 'Select department' }}</option>
+                <option v-for="d in formDepartments" :key="d" :value="d">{{ d }}</option>
+              </select>
+            </div>
+            <!-- The Dean adds someone as Faculty or straight away as the Department Chair. -->
+            <div v-if="!editing && !isChair">
+              <label class="ifl">Role <span style="color:var(--red)">*</span></label>
+              <select v-model="form.role" class="ifse">
+                <option value="faculty">Faculty</option>
+                <option value="dept_chair">Department Chair</option>
+              </select>
+              <div v-if="form.role === 'dept_chair'" style="font-size:11px;color:var(--stone);margin-top:4px">The department's current chair, if any, goes back to Faculty.</div>
+            </div>
+            <div>
+              <label class="ifl">Contact Number</label>
+              <input v-model="form.contact_number" class="ifi" maxlength="11" inputmode="numeric" placeholder="09171234567"
+                :style="contactProblem ? 'border-color:var(--red);border-width:1.5px' : ''"
+                @input="form.contact_number = String(form.contact_number ?? '').replace(/[^0-9]/g, '').slice(0, 11)" />
+              <div v-if="contactProblem" style="font-size:11px;color:var(--red);margin-top:4px">Must start with 09 and be 11 digits long.</div>
+            </div>
+          </div>
+          <div v-if="!needsCollegePick || editing" style="font-size:12px;color:var(--stone);margin-top:10px">College: <strong>{{ editing?.college || auth.user?.college || 'n/a' }}</strong></div>
+          <div v-if="collegeUnmatched && !editing" style="font-size:11.5px;color:var(--amber);background:var(--amber-lt);border-radius:var(--r-sm);padding:8px 10px;margin-top:6px">Your account's college "{{ auth.user?.college }}" is not in the official college list, so its departments can't be shown. Ask the GCU Head to set your college in User Management.</div>
+          <div v-if="formError" style="color:var(--red);font-size:12px;margin-top:10px">{{ formError }}</div>
+        </div>
+        <div class="ffoot">
+          <button class="ibtn ibtn-p" :disabled="saving || emailProblem || contactProblem || employeeIdDuplicate || nameDuplicate || emailDuplicate" @click="saveForm">{{ saving ? 'Saving...' : 'Save' }}</button>
+<button class="ibtn ibtn-o" @click="formOpen = false">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Assign chair modal -->
+    <div v-if="chairTarget" class="fmodal" @click.self="chairTarget = null">
+      <div class="fbox" style="max-width:420px">
+        <div class="fhead"><span>Assign Department Chair</span><button class="ibtn ibtn-g ibtn-sm" @click="chairTarget = null">✕</button></div>
+        <div class="fbody">
+          <p style="font-size:13px;margin-bottom:12px">Make <strong>{{ chairTarget.name }}</strong> the Department Chair of:</p>
+          <select v-model="chairDept" class="ifse">
+            <option value="">Select department</option>
+            <option v-for="d in departments" :key="d" :value="d">{{ d }}</option>
+          </select>
+          <p style="font-size:11px;color:var(--stone);margin-top:8px">The current chair of that department (if any) goes back to regular faculty.</p>
+        </div>
+        <div class="ffoot">
+          <button class="ibtn ibtn-p" :disabled="!chairDept || saving" @click="confirmChair">Assign</button>
+<button class="ibtn ibtn-o" @click="chairTarget = null">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Deactivate / Reactivate (reason required) -->
+    <ReasonDialog
+      :open="!!statusAsk"
+      :title="statusAsk?.deactivating ? 'Deactivate account?' : 'Reactivate account?'"
+      :message="statusAsk ? (statusAsk.deactivating ? `Deactivate <strong>${statusAsk.name}</strong>? They will no longer be able to sign in.` : `Reactivate <strong>${statusAsk.name}</strong>? They will be required to change their password at their next login.${statusAsk.deactivation_reason ? `<br><span style=\\'color:var(--stone)\\'>Deactivated: ${statusAsk.deactivation_reason}${statusAsk.deactivated_at ? ' on ' + new Date(statusAsk.deactivated_at).toLocaleDateString() : ''}.</span>` : ''}`) : ''"
+      :reasons="statusAsk?.deactivating ? EMPLOYEE_DEACTIVATE_REASONS : reactivationReasonsFor(statusAsk?.deactivation_reason)"
+      :confirm-text="statusAsk?.deactivating ? 'Yes, Deactivate' : 'Yes, Reactivate'"
+      :danger="!!statusAsk?.deactivating"
+      :busy="saving"
+      :error="statusError"
+      @confirm="doStatus"
+      @cancel="statusAsk = null"
+    />
+
+    <!-- Reset Password (reason required) -->
+    <ResetPasswordDialog
+      :open="!!resetAsk"
+      kind="employee"
+      :name="resetAsk?.name || ''"
+      :fetch-info="() => facultyAPI.passwordInfo(resetAsk.id).then(r => r.data)"
+      :busy="saving"
+      :error="resetError"
+      @confirm="doReset"
+      @cancel="resetAsk = null"
+    />
+
+    <!-- Confirm modal -->
+    <div v-if="confirm" class="fmodal" @click.self="confirm = null">
+      <div class="fbox" style="max-width:400px">
+        <div class="fhead"><span>Please confirm</span></div>
+        <div class="fbody"><p style="font-size:13px">{{ confirm.text }}</p></div>
+        <div class="ffoot">
+          <button class="ibtn ibtn-p" :disabled="saving" @click="runConfirm">Yes, continue</button>
+<button class="ibtn ibtn-o" @click="confirm = null">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Temp password modal -->
+    <div v-if="tempInfo" class="fmodal" @click.self="tempInfo = null">
+      <div class="fbox" style="max-width:420px">
+        <div class="fhead"><span>Temporary Password</span></div>
+        <div class="fbody">
+          <p style="font-size:13px;margin-bottom:8px">{{ tempInfo.name }} must change this at first login. Share it privately.</p>
+          <div style="font-family:var(--mono);font-size:16px;background:var(--snow);padding:10px 12px;border-radius:8px">{{ tempInfo.password }}</div>
+        </div>
+        <div class="ffoot"><button class="ibtn ibtn-p" @click="tempInfo = null">Done</button></div>
+      </div>
+    </div>
+
+    <!-- Upload modal - same look as Upload Student Masterlist (sticky header
+         with a close ✕, instruction box, labeled file input, bordered
+         scrollable preview table, status badges, spinner on the primary
+         button) while keeping the faculty-specific per-row decision and
+         validation this upload already had. -->
+    <div v-if="uploadOpen" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="closeUpload">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:760px;overflow:hidden;box-shadow:var(--sh-lg);max-height:90vh;overflow-y:auto">
+        <div style="padding:20px 22px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1">
+          <div style="font-size:15px;font-weight:600;color:var(--ink)">Upload Faculty</div>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+          <template v-if="!result">
+            <div style="background:var(--snow);border-radius:var(--r-sm);padding:12px 14px;font-size:12px;color:var(--stone);line-height:1.6">
+              CSV or Excel with columns: Last Name, First Name, Middle Name, Suffix, Email, Employee ID, Contact Number<span v-if="!isChair">, Department</span>.
+              Everyone is added as <strong>Faculty</strong> of <strong>{{ auth.user?.college }}</strong><span v-if="isChair"> / {{ auth.user?.department }}</span><span v-else>, in whichever Department the file specifies (must belong to {{ auth.user?.college }})</span>. If a row includes its own College column and it's a different college, that row is rejected, not changed. Download the template below, fill it in, then upload it here.
+            </div>
+            <a href="/templates/faculty_masterlist_template.xlsx" download class="ibtn ibtn-o" style="width:100%;justify-content:center">
+              <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Download Template
+            </a>
+            <div>
+              <label class="ifl">File <span style="font-weight:400;color:var(--stone)">(Accepted file formats: .csv, .xlsx, .xls)</span></label>
+              <input type="file" accept=".csv,.xlsx,.xls,.txt" class="ifi" @change="onFile" />
+            </div>
+            <div v-if="uploadError" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px">
+              {{ uploadError }}
+            </div>
+
+            <template v-if="preview.length">
+              <div style="font-size:13px;color:var(--stone)">{{ preview.length }} record(s) found</div>
+              <div style="max-height:340px;overflow:auto;border:1px solid var(--cloud);border-radius:var(--r-sm)">
+                <table class="itable" style="min-width:860px">
+                  <thead>
+                    <tr><th style="width:46px">Row</th><th style="width:120px">Last Name</th><th style="width:120px">First Name</th><th style="width:120px">Middle Name</th><th>Email</th><th>College / Department</th><th style="width:90px">Status</th><th style="width:150px">Action</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(r, i) in preview" :key="i">
+                      <td style="font-size:12px">{{ r.row }}</td>
+                      <td style="font-size:12px;white-space:nowrap">{{ r.last_name || '-' }}</td>
+                      <td style="font-size:12px;white-space:nowrap">{{ r.first_name || '-' }}</td>
+                      <td style="font-size:12px;white-space:nowrap">{{ r.middle_name || '-' }}</td>
+                      <td style="font-family:var(--mono);font-size:12px">{{ r.email }}</td>
+                      <td style="font-size:11px;line-height:1.5">{{ r.college || '-' }}<br /><span style="color:var(--stone)">{{ r.department || '-' }}</span></td>
+                      <td>
+                        <span v-if="!r.valid" class="ibadge" style="background:var(--red-lt);color:var(--red)">Invalid</span>
+                        <span v-else-if="r.is_duplicate" class="ibadge" style="background:var(--amber-lt);color:var(--amber)">Duplicate</span>
+                        <span v-else class="ibadge" style="background:var(--mist);color:var(--moss)">New</span>
+                      </td>
+                      <td>
+                        <select v-if="r.valid" v-model="decisions[i]" class="fsm">
+                          <option value="create" v-if="!r.is_duplicate">Add</option>
+                          <option value="update" v-if="r.is_duplicate">Update</option>
+                          <option value="skip">Skip</option>
+                        </select>
+                        <span v-else style="color:var(--red);font-size:11px;line-height:1.5">{{ r.reasons.join(' ') }}</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </template>
+          </template>
+          <template v-else>
+            <div style="background:var(--snow);border-radius:var(--r-sm);padding:14px;font-size:13px">
+              <strong>{{ result.created }}</strong> added, <strong>{{ result.updated }}</strong> updated, <strong>{{ result.skipped }}</strong> skipped.
+            </div>
+            <div v-if="result.errors?.length" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px">
+              <div v-for="e in result.errors" :key="e">{{ e }}</div>
+            </div>
+            <template v-if="result.passwords?.length">
+              <div style="font-size:12px;color:var(--stone)">Temporary passwords (shown once - copy them now):</div>
+              <div style="max-height:220px;overflow-y:auto;border:1px solid var(--cloud);border-radius:var(--r-sm)">
+                <table class="itable">
+                  <thead><tr><th>Name</th><th>Email</th><th>Temp Password</th></tr></thead>
+                  <tbody><tr v-for="p in result.passwords" :key="p.email"><td style="font-size:12px">{{ p.name }}</td><td style="font-size:12px">{{ p.email }}</td><td style="font-family:var(--mono)">{{ p.temp_password }}</td></tr></tbody>
+                </table>
+              </div>
+            </template>
+          </template>
+        </div>
+        <div v-if="!result && preview.length && blocksOnCollegeScopeMismatch" style="padding:0 22px;font-size:12px;color:var(--red);text-align:center">
+          {{ invalidPreviewCount }} row{{ invalidPreviewCount === 1 ? '' : 's' }} {{ invalidPreviewCount === 1 ? 'is' : 'are' }} outside your college/department and can't be uploaded here. Remove {{ invalidPreviewCount === 1 ? 'it' : 'them' }} or choose a different file.
+        </div>
+        <div v-else-if="!result && preview.length && invalidPreviewCount > 0" style="padding:0 22px;font-size:12px;color:var(--amber);text-align:center">
+          {{ invalidPreviewCount }} invalid row{{ invalidPreviewCount === 1 ? '' : 's' }} will be skipped.
+        </div>
+        <div style="padding:14px 22px;border-top:1px solid var(--cloud);display:flex;justify-content:flex-end;gap:8px">
+          <button v-if="!result && preview.length" class="ibtn ibtn-p" :disabled="saving || blocksOnCollegeScopeMismatch" @click="confirmUpload">
+            <span v-if="saving" style="width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:inline-block"></span>
+            {{ saving ? 'Uploading...' : 'Confirm Upload' }}
+          </button>
+<button class="ibtn ibtn-o" @click="closeUpload">{{ result ? 'Close' : 'Cancel' }}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted, inject } from 'vue';
+import axios from 'axios';
+import { facultyAPI } from '../../api/index';
+import ReasonDialog from '../../components/ReasonDialog.vue';
+import ResetPasswordDialog from '../../components/ResetPasswordDialog.vue';
+import { EMPLOYEE_DEACTIVATE_REASONS, reactivationReasonsFor } from '../../constants/accountReasons';
+import { useAuthStore } from '../../stores/auth';
+import { safeSearchInput, blockSpecialKeypress, onlyLetters, onlyDigits, capitalizeFirst, isValidPHContact } from '../../utils/validators';
+import { matchCollege } from '../../utils/colleges';
+// Catches a likely typo in the domain (e.g. "name@bsu.edu.phh") as the Dept
+// Chair/Dean types it - same check used on the student-facing forms.
+import { emailProblem as checkEmailTypo } from '../../utils/emailCheck';
+import { useAutoRefresh } from '../../utils/useAutoRefresh';
+
+const auth  = useAuthStore();
+const toast = inject('toast', null);
+
+const isDean  = computed(() => ['dean', 'dean_secretary'].includes(auth.user?.role));
+const isChair = computed(() => auth.user?.role === 'dept_chair');
+// Admin-side roles have no college of their own, so adding faculty needs a College pick.
+const needsCollegePick = computed(() => !isDean.value && !isChair.value);
+const formDepartments = computed(() => {
+  if (!needsCollegePick.value || editing.value) return departments.value;
+  const c = colleges.value.find(x => x.name === form.value.college);
+  return c ? allDepartments.value.filter(d => d.college_id === c.id).map(d => d.name) : [];
+});
+
+const SUFFIX_OPTIONS = ['Jr.', 'Sr.', 'I', 'II', 'III', 'IV', 'V'];
+const API_ROOT = import.meta.env.VITE_API_URL || '';
+const items = ref([]);
+const loading = ref(true);
+const search = ref('');
+const deptFilter = ref('');
+const statusFilter = ref('');
+const sortOption = ref('created_at:desc');
+const total = ref(0);
+const pageFrom = ref(0);
+const pageTo = ref(0);
+const viewTarget = ref(null);
+const page = ref(1);
+const lastPage = ref(1);
+const departments = ref([]);
+// A Dean/Chair whose saved college isn't in the official list (older spelling).
+const collegeUnmatched = ref(false);
+const colleges = ref([]);
+const allDepartments = ref([]);
+let timer = null;
+
+function onSearch() { search.value = safeSearchInput(search.value); clearTimeout(timer); timer = setTimeout(() => { page.value = 1; fetchItems(); }, 300); }
+
+async function fetchItems(silent = false) {
+  if (!silent) loading.value = true;
+  try {
+    const [sortBy, sortDir] = sortOption.value.split(':');
+    const res = await facultyAPI.index({
+      search: search.value || undefined,
+      department: deptFilter.value || undefined,
+      is_active: statusFilter.value === '' ? undefined : statusFilter.value,
+      sort_by: sortBy, sort_dir: sortDir,
+      page: page.value,
+    });
+    items.value = res.data.data || [];
+    lastPage.value = res.data.last_page || 1;
+    total.value = res.data.total || 0;
+    pageFrom.value = res.data.from || 0;
+    pageTo.value = res.data.to || 0;
+  } catch (e) {
+    if (!silent) toast?.error(e.response?.data?.message || 'Could not load faculty.');
+  } finally {
+    if (!silent) loading.value = false;
+  }
+}
+
+// Departments of the signed-in user's own college (Dean picks from these).
+async function fetchDepartments() {
+  try {
+    const headers = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}`, Accept: 'application/json' } };
+    const [cRes, dRes] = await Promise.all([
+      axios.get(`${API_ROOT}/api/management/colleges`, headers),
+      axios.get(`${API_ROOT}/api/management/programs`, headers),   // the choices are the college's programs (the leader's list), named Department
+    ]);
+    colleges.value = cRes.data;
+    allDepartments.value = dRes.data;
+    const officialName = matchCollege(auth.user?.college, cRes.data.map(c => c.name));
+    const mine = cRes.data.find(c => c.name === officialName);
+    collegeUnmatched.value = !needsCollegePick.value && !mine;
+    // Dean/Chair see their own college's departments; admin-side roles have no
+    // college of their own, so they get every department (and pick a college
+    // first when adding).
+    departments.value = mine
+      ? dRes.data.filter(d => d.college_id === mine.id).map(d => d.name)
+      : (needsCollegePick.value ? [...new Set(dRes.data.map(d => d.name))] : []);
+  } catch (e) { /* the list just stays empty */ }
+}
+
+function resetFilters() {
+  search.value = ''; statusFilter.value = ''; deptFilter.value = ''; sortOption.value = 'created_at:desc';
+  page.value = 1; fetchItems();
+}
+
+function initials(first, last) { return ((first?.[0] || '') + (last?.[0] || '')).toUpperCase() || '?'; }
+function openView(u) { viewTarget.value = u; }
+function editFromView() { const u = viewTarget.value; viewTarget.value = null; openForm(u); }
+function chairFromView() { const u = viewTarget.value; viewTarget.value = null; openChair(u); }
+function askFromView(kind, text) { const u = viewTarget.value; viewTarget.value = null; askAction(kind, u, text); }
+
+// ---- add / edit ----
+const formOpen = ref(false);
+const editing = ref(null);
+const saving = ref(false);
+// B#, 11/4/2026: an invalid row already gets 'skip' forced on it (see
+// onFile() below) and has no decision dropdown to change that, so Confirm
+// Upload was always safe either way. It's now actually greyed out, but only
+// when EVERY invalid row is a college/department SCOPE mismatch (a row
+// outside the Dept Chair's/Dean's own college - see
+// UserController::scopeImportRow(), which this inherits). An ordinary bad
+// row (bad email, missing name, etc.) still just gets quietly skipped like
+// before, same policy as the Dean's Employee/Faculty masterlist
+// (users/Index.vue) and the Student masterlist (students/Index.vue).
+const invalidPreviewCount = computed(() => preview.value.filter(r => !r.valid).length);
+const COLLEGE_SCOPE_MISMATCH = /is not a department under|belongs to an account in another college/i;
+const blocksOnCollegeScopeMismatch = computed(() => {
+  const invalid = preview.value.filter(r => !r.valid);
+  return invalid.length > 0 && invalid.every(r => (r.reasons || []).length > 0 && r.reasons.every(x => COLLEGE_SCOPE_MISMATCH.test(x)));
+});
+const formError = ref('');
+const blank = () => ({ first_name: '', last_name: '', middle_name: '', suffix: '', email: '', employee_id: '', contact_number: '', department: '', college: '', role: 'faculty' });
+const form = ref(blank());
+const tempInfo = ref(null);
+
+function openForm(u) {
+  editing.value = u;
+  formError.value = '';
+  employeeIdDuplicate.value = false;
+  nameDuplicate.value = false;
+  emailDuplicate.value = false;
+  form.value = u ? { ...blank(), ...u } : blank();
+  formOpen.value = true;
+}
+
+// Contact number is optional, but when given it must be 09 + 9 digits.
+const contactProblem = computed(() => !!form.value?.contact_number && !isValidPHContact(form.value.contact_number));
+// B: live email format/typo check, as the user types - same rule as submit,
+// just shown earlier. '' when the email is fine (or empty).
+const emailProblem = computed(() => (form.value?.email ? checkEmailTypo(form.value.email) : ''));
+
+// Bug (10/24/2026, B638): Employee ID and name were only checked for a
+// duplicate at submit time - checked live instead, as the Dean/Dept Chair
+// types, the same way the email format is checked above. Debounced so it
+// doesn't fire an API call on every keystroke.
+// B#, 11/4/2026: Middle Name (folded into the name check) and Email are
+// now checked live too - they used to be checked only at submit time
+// (Email, as part of saveForm()'s own uniqueness error) or not at all
+// (Middle Name).
+const employeeIdDuplicate = ref(false);
+const nameDuplicate       = ref(false);
+const emailDuplicate      = ref(false);
+let duplicateCheckTimeout = null;
+
+function queueDuplicateCheck() {
+  clearTimeout(duplicateCheckTimeout);
+  duplicateCheckTimeout = setTimeout(async () => {
+    const f = form.value;
+    const params = { ignore_id: editing.value?.id || undefined };
+    if (f.employee_id) params.employee_id = f.employee_id;
+    if (f.first_name && f.last_name) {
+      params.first_name = f.first_name;
+      params.last_name = f.last_name;
+      if (f.middle_name) params.middle_name = f.middle_name;
+    }
+    if (f.email) params.email = f.email;
+    if (!params.employee_id && !params.first_name && !params.email) {
+      employeeIdDuplicate.value = false;
+      nameDuplicate.value = false;
+      emailDuplicate.value = false;
+      return;
+    }
+    try {
+      const res = await facultyAPI.checkDuplicate(params);
+      employeeIdDuplicate.value = params.employee_id ? !!res.data.employee_id_exists : false;
+      nameDuplicate.value       = params.first_name  ? !!res.data.name_exists        : false;
+      emailDuplicate.value      = params.email       ? !!res.data.email_exists       : false;
+    } catch (e) {
+      // A failed check never blocks typing - submit still re-checks for real.
+    }
+  }, 350);
+}
+
+async function saveForm() {
+  if (saving.value) return;
+  formError.value = '';
+  const f = form.value;
+  if (contactProblem.value) { formError.value = 'Contact number must start with 09 and be 11 digits long.'; return; }
+  if (!f.first_name || !f.last_name || !f.email) { formError.value = 'First name, last name and email are required.'; return; }
+  if (emailProblem.value) { formError.value = emailProblem.value; return; }
+  if (employeeIdDuplicate.value) { formError.value = 'Employee ID already exists. Please enter a unique Employee ID.'; return; }
+  if (nameDuplicate.value) { formError.value = 'A faculty member with this name already exists.'; return; }
+  if (emailDuplicate.value) { formError.value = 'This email address is already in use.'; return; }
+  if (needsCollegePick.value && !editing.value && !f.college) { formError.value = 'Please select a college.'; return; }
+  if (!isChair.value && !f.department) { formError.value = 'Please select a department.'; return; }
+  saving.value = true;
+  try {
+    const payload = { ...f };
+    if (editing.value) {
+      await facultyAPI.update(editing.value.id, payload);
+      toast?.success('Faculty updated.');
+    } else {
+      const res = await facultyAPI.store(payload);
+      tempInfo.value = { name: res.data.user.name, password: res.data.temp_password };
+      toast?.success('Faculty added.');
+    }
+    formOpen.value = false;
+    fetchItems();
+  } catch (e) {
+    const errs = e.response?.data?.errors;
+    formError.value = errs ? Object.values(errs).flat()[0] : (e.response?.data?.message || 'Could not save.');
+  } finally {
+    saving.value = false;
+  }
+}
+
+// ---- confirm actions (reset, toggle, remove chair) ----
+const confirm = ref(null);
+const statusAsk = ref(null);
+const statusError = ref('');
+const resetAsk = ref(null);
+const resetError = ref('');
+function askAction(kind, u, text) {
+  if (kind === 'toggle') { statusError.value = ''; statusAsk.value = { id: u.id, name: u.name, deactivating: !!u.is_active, deactivation_reason: u.deactivation_reason, deactivated_at: u.deactivated_at }; return; }
+  if (kind === 'reset')  { resetError.value = ''; resetAsk.value = { id: u.id, name: u.name }; return; }
+  confirm.value = { kind, u, text };
+}
+const apiMsg = (e, fallback) => { const errs = e.response?.data?.errors; return (errs && Object.values(errs)[0]?.[0]) || e.response?.data?.message || fallback; };
+async function doStatus({ reason, note }) {
+  if (saving.value) return;
+  saving.value = true; statusError.value = '';
+  try {
+    await facultyAPI.toggleActive(statusAsk.value.id, { reason, note });
+    toast?.success(statusAsk.value.deactivating ? 'Account deactivated.' : 'Account reactivated.');
+    statusAsk.value = null;
+    fetchItems();
+  } catch (e) { statusError.value = apiMsg(e, 'Action failed.'); }
+  finally { saving.value = false; }
+}
+async function doReset({ reason, note }) {
+  if (saving.value) return;
+  saving.value = true; resetError.value = '';
+  try {
+    const res = await facultyAPI.resetPassword(resetAsk.value.id, { reason, note });
+    tempInfo.value = { name: resetAsk.value.name, password: res.data.temp_password };
+    resetAsk.value = null;
+    fetchItems();
+  } catch (e) { resetError.value = apiMsg(e, 'Could not reset the password.'); }
+  finally { saving.value = false; }
+}
+async function runConfirm() {
+  const { kind, u } = confirm.value;
+  saving.value = true;
+  try {
+    if (kind === 'removeChair') { await facultyAPI.removeChair(u.id); toast?.success('Department Chair removed.'); }
+    confirm.value = null;
+    fetchItems();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Action failed.');
+  } finally {
+    saving.value = false;
+  }
+}
+
+// ---- assign chair ----
+const chairTarget = ref(null);
+const chairDept = ref('');
+function openChair(u) { chairTarget.value = u; chairDept.value = u.department || ''; }
+async function confirmChair() {
+  saving.value = true;
+  try {
+    await facultyAPI.assignChair(chairTarget.value.id, { department: chairDept.value });
+    toast?.success('Department Chair assigned.');
+    chairTarget.value = null;
+    fetchItems();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Could not assign.');
+  } finally {
+    saving.value = false;
+  }
+}
+
+// ---- upload ----
+const uploadOpen = ref(false);
+const preview = ref([]);
+const decisions = ref({});
+const uploadToken = ref('');
+const uploadError = ref('');
+const result = ref(null);
+
+function openUpload() { uploadOpen.value = true; preview.value = []; decisions.value = {}; result.value = null; uploadError.value = ''; }
+function closeUpload() { uploadOpen.value = false; if (result.value) fetchItems(); }
+
+async function onFile(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  uploadError.value = '';
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await facultyAPI.importPreview(fd);
+    preview.value = res.data.preview || [];
+    uploadToken.value = res.data.token;
+    const d = {};
+    preview.value.forEach((r, i) => { d[i] = !r.valid ? 'skip' : (r.is_duplicate ? 'skip' : 'create'); });
+    decisions.value = d;
+    if (!preview.value.length) uploadError.value = 'No rows found in that file.';
+  } catch (err) {
+    uploadError.value = err.response?.data?.message || 'Could not read that file.';
+  }
+}
+
+async function confirmUpload() {
+  saving.value = true;
+  try {
+    const res = await facultyAPI.importConfirm({ token: uploadToken.value, decisions: decisions.value });
+    result.value = res.data;
+  } catch (err) {
+    uploadError.value = err.response?.data?.message || 'Upload failed.';
+  } finally {
+    saving.value = false;
+  }
+}
+
+onMounted(() => { fetchItems(); fetchDepartments(); });
+// Keeps the list current without a manual reload. Skipped while a form
+// is open so it can't reorder the table behind an in-progress add/edit.
+useAutoRefresh(() => { if (!formOpen.value && !uploadOpen.value) fetchItems(true); }, 25000);
+</script>
+
+<style scoped>
+.vlabel { font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--fog); margin-bottom: 3px; }
+.fmodal { position: fixed; inset: 0; background: rgba(0,0,0,.42); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.fbox { background: #fff; border-radius: var(--r-lg); width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; box-shadow: var(--sh-lg); }
+.fhead { padding: 18px 22px; border-bottom: 1px solid var(--cloud); display: flex; align-items: center; justify-content: space-between; font-size: 15px; font-weight: 600; color: var(--ink); }
+.fbody { padding: 20px 22px; }
+.ffoot { padding: 14px 22px; border-top: 1px solid var(--cloud); display: flex; justify-content: flex-end; gap: 8px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 560px) { .grid2 { grid-template-columns: minmax(0, 1fr); } .ffoot { flex-wrap: wrap; } .ffoot .ibtn { flex: 1 1 auto; justify-content: center; } }
+</style>

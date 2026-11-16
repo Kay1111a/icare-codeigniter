@@ -1,0 +1,317 @@
+<template>
+  <div style="display:flex;min-height:100vh">
+    <!-- Sidebar - pinned to the viewport (sticky + its own height/scroll)
+         instead of stretching with the main content column. Without this,
+         a long page (e.g. "My Appointments" with many rows) made this
+         flex child grow to match the content's height, pushing the
+         logout button far down the page instead of staying reachable. -->
+    <div v-if="menuOpen" class="sb-backdrop" @click="menuOpen = false"></div>
+    <div class="stu-sidebar" :class="{ open: menuOpen, 'sb-collapsed': collapsed }" style="width:240px;background:var(--forest);color:#fff;display:flex;flex-direction:column;flex-shrink:0;position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto">
+      <div class="sb-head">
+        <img v-show="sealBsu" class="logo-bsu sb-logo" :src="'/bsu-logo.jpg'" alt="Benguet State University" title="Benguet State University" @error="sealBsu = false" />
+        <img v-show="sealOss" class="logo-oss sb-logo" :src="'/oss-logo.jpg'" alt="Office of Student Services" title="Office of Student Services" @error="sealOss = false" />
+        <div class="sb-hide">
+          <div style="font-family:var(--serif);font-style:italic;font-size:16px">iCARE</div>
+          <div style="font-size:10px;color:rgba(255,255,255,.5)">Student Portal</div>
+        </div>
+      </div>
+
+      <div class="sb-hide" style="padding:0 12px;font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.4);margin:12px 0 6px 8px">Main</div>
+
+      <nav style="flex:1;display:flex;flex-direction:column;gap:2px;padding:0 12px">
+        <router-link
+          v-for="item in menuItems"
+          :key="item.name"
+          :to="{ name: item.name }"
+          class="stu-nb"
+          :class="{ 'nb-locked': pwLocked && item.name !== 'student-account' }"
+          :title="pwLocked && item.name !== 'student-account' ? 'Change your password first' : item.label"
+          @click="lockClick($event, item.name)"
+          style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;color:rgba(255,255,255,.75);text-decoration:none;font-size:13px;transition:background .15s"
+          :style="isActive(item.name) ? 'background:rgba(255,255,255,.12);color:#fff;font-weight:600' : ''"
+        >
+          <svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2" v-html="item.icon"></svg>
+          <span class="sb-hide">{{ item.label }}</span>
+        </router-link>
+      </nav>
+
+      <div class="stu-foot" style="padding:14px;border-top:1px solid rgba(255,255,255,.1);display:flex;align-items:center;gap:10px">
+        <div style="width:32px;height:32px;border-radius:50%;background:var(--gold);color:var(--forest);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">
+          {{ initials }}
+        </div>
+        <div class="sb-hide" style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ student.first_name }} {{ student.last_name }}</div>
+          <div style="font-size:10px;color:rgba(255,255,255,.5)">{{ student.student_id }}</div>
+        </div>
+        <button class="stu-logbtn" @click="session.askLogout()" title="Log out" aria-label="Log out">
+          <svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          <span class="sb-hide">Log out</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Main content -->
+    <div style="flex:1;background:var(--snow);min-width:0">
+      <div class="stu-topbar" style="background:#fff;border-bottom:1px solid var(--cloud);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;position:relative">
+        <div style="display:flex;align-items:center;gap:10px;min-width:0">
+          <button class="collapse-btn" :aria-label="collapsed ? 'Expand menu' : 'Collapse menu'" :title="collapsed ? 'Expand menu' : 'Collapse menu'" @click="toggleCollapsed"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/><polyline v-if="collapsed" points="13 9 16 12 13 15"/><polyline v-else points="16 9 13 12 16 15"/></svg></button>
+          <button class="menu-btn" aria-label="Open menu" @click="menuOpen = true"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+          <div style="font-size:13px;color:var(--fog)">iCARE / <strong style="color:var(--ink)">{{ pageTitle }}</strong></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="tb-date">{{ todayLabel }} · {{ timeLabel }}</span>
+          <div v-if="sealBsu || sealOss" class="tb-seals">
+            <img v-show="sealBsu" class="logo-bsu" :src="'/bsu-logo.jpg'" alt="Benguet State University" @error="sealBsu = false" />
+            <img v-show="sealOss" class="logo-oss" :src="'/oss-logo.jpg'" alt="Office of Student Services" @error="sealOss = false" />
+          </div>
+          <button @click="showNotifs = !showNotifs" style="position:relative;background:none;border:none;cursor:pointer;padding:7px;color:var(--stone);border-radius:var(--r-sm)">
+            <svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;display:block">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            <span v-if="unreadCount > 0" style="position:absolute;top:-3px;right:-5px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--red);color:#fff;font-size:10px;font-weight:700;line-height:17px;text-align:center;border:2px solid #fff;box-sizing:content-box">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
+          </button>
+        </div>
+
+        <div v-if="showNotifs" style="position:absolute;top:52px;right:24px;width:320px;background:#fff;border-radius:var(--r-lg);box-shadow:var(--sh-lg);border:1px solid var(--cloud);z-index:100;overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--cloud);display:flex;align-items:center;justify-content:space-between">
+            <div style="font-size:13px;font-weight:600;color:var(--ink)">Notifications</div>
+            <button class="ibtn ibtn-g ibtn-sm" @click="markAllRead" style="font-size:11px">Mark all read</button>
+          </div>
+          <div style="max-height:320px;overflow-y:auto">
+            <div v-if="notifications.length === 0" style="padding:20px;text-align:center;font-size:13px;color:var(--fog)">
+              No notifications
+            </div>
+            <div
+              v-for="n in notifications"
+              :key="n.id"
+              style="padding:12px 16px;border-bottom:1px solid var(--cloud);cursor:pointer;transition:background .1s"
+              :style="{ background: n.read_at ? '#fff' : 'var(--foam)' }"
+              @click="openNotification(n)"
+            >
+              <div style="display:flex;gap:10px;align-items:flex-start">
+                <div style="width:7px;height:7px;border-radius:50%;margin-top:5px;flex-shrink:0" :style="{ background: n.read_at ? 'transparent' : 'var(--moss)' }"></div>
+                <div>
+                  <div style="font-size:13px;color:var(--ink)">{{ n.data?.message || 'Notification' }}</div>
+                  <div style="font-size:11px;color:var(--fog);margin-top:2px">{{ formatNotifTime(n.created_at) }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="border-top:1px solid var(--cloud);padding:8px;text-align:center">
+            <button class="ibtn ibtn-g ibtn-sm" style="font-size:12px;width:100%;justify-content:center" @click="viewAllNotifs">View all</button>
+          </div>
+        </div>
+      </div>
+      <div class="stu-content" style="padding:24px">
+        <router-view />
+      </div>
+    </div>
+
+    <!-- Phones: every student page one tap away at the bottom -->
+    <nav class="tabbar tabbar-fixed" aria-label="Main pages">
+      <router-link v-for="item in tabItems" :key="item.name" :to="{ name: item.name }" class="tab" :class="{ active: isActive(item.name), 'nb-locked': pwLocked && item.name !== 'student-account' }" @click="lockClick($event, item.name)">
+        <svg viewBox="0 0 24 24" v-html="item.icon"></svg>
+        <span>{{ item.label.replace(/^My /, '') }}</span>
+      </router-link>
+    </nav>
+
+    <!-- Log out confirmation, and the automatic log out after a period of no activity -->
+    <SessionGuard ref="session" @logout="logout" />
+  </div>
+</template>
+
+<script setup>
+import { SELF_REFERRAL_ENABLED } from '../utils/features';
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
+import { studentNotificationTarget } from '../utils/notificationTarget';
+import { useRoute, useRouter } from 'vue-router';
+import axios from 'axios';
+import SessionGuard from '../components/SessionGuard.vue';
+import { usePageSubtitleStore } from '../stores/pageSubtitle';
+
+const route  = useRoute();
+const router = useRouter();
+const pageSubtitle = usePageSubtitleStore();
+
+// Phone menu: closed by default, and closes again after choosing a page.
+const menuOpen = ref(false);
+
+// Desktop: the menu can be folded down to a strip of icons. Remembered on this browser.
+const collapsed = ref(false);
+try { collapsed.value = localStorage.getItem('sidebar_collapsed') === '1'; } catch (e) { /* stays open */ }
+function toggleCollapsed() {
+  collapsed.value = !collapsed.value;
+  try { localStorage.setItem('sidebar_collapsed', collapsed.value ? '1' : '0'); } catch (e) { /* not remembered */ }
+}
+// The two seals in the top bar are hidden if a file is missing.
+// Date and time in the top bar: Philippine time, same as the staff pages.
+const PH = 'Asia/Manila';
+const now = ref(new Date());
+const todayLabel = computed(() => now.value.toLocaleDateString('en-US', { timeZone: PH, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }));
+const timeLabel  = computed(() => now.value.toLocaleTimeString('en-US', { timeZone: PH, hour: 'numeric', minute: '2-digit', hour12: true }));
+const clockTimer = setInterval(() => { now.value = new Date(); }, 5000);
+onBeforeUnmount(() => clearInterval(clockTimer));
+const sealBsu = ref(true);
+const sealOss = ref(true);
+watch(() => route.fullPath, () => { menuOpen.value = false; });
+const student = ref(JSON.parse(localStorage.getItem('student') || '{}'));
+
+const API_BASE = `${import.meta.env.VITE_API_URL || ''}/api`;
+function authHeaders() {
+  return { headers: { Authorization: `Bearer ${localStorage.getItem('student_token')}` } };
+}
+
+const showNotifs = ref(false);
+const session = ref(null);
+const notifications = ref([]);
+const unreadTotal = ref(0);
+const unreadCount = computed(() => Math.max(unreadTotal.value, notifications.value.filter(n => !n.read_at).length));
+
+async function fetchNotifications() {
+  try {
+    const res = await axios.get(`${API_BASE}/student/notifications`, authHeaders());
+    notifications.value = res.data.data || res.data;
+    unreadTotal.value = res.data.unread_count ?? notifications.value.filter(n => !n.read_at).length;
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function markRead(n) {
+  if (n.read_at) return;
+  try {
+    await axios.post(`${API_BASE}/student/notifications/${n.id}/read`, {}, authHeaders());
+    n.read_at = new Date().toISOString();
+    unreadTotal.value = Math.max(0, unreadTotal.value - 1);
+  } catch (e) {
+    // Non-fatal.
+  }
+}
+
+async function markAllRead() {
+  try {
+    await axios.post(`${API_BASE}/student/notifications/read-all`, {}, authHeaders());
+    notifications.value.forEach(n => n.read_at = n.read_at || new Date().toISOString());
+    unreadTotal.value = 0;
+  } catch (e) {
+    // Non-fatal.
+  }
+}
+
+function formatNotifTime(date) {
+  if (!date) return '';
+  const diffMs = Date.now() - new Date(date).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(date).toLocaleDateString();
+}
+
+const menuItems = [
+  { name: 'student-dashboard', label: 'Dashboard', icon: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>' },
+  { name: 'student-appointments', label: 'My Appointments', icon: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>' },
+  ...(SELF_REFERRAL_ENABLED ? [{ name: 'student-refer', label: 'Refer Myself', icon: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>' }] : []),
+  { name: 'student-referrals', label: 'My Referrals', icon: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>' },
+  { name: 'student-refer-choice', label: 'Refer', icon: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>' },
+  { name: 'student-sent-referrals', label: 'Sent Referrals', icon: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>' },
+  { name: 'student-sent-complaints', label: 'Sent Complaints', icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>' },
+  { name: 'student-testing', label: 'My Testing', icon: '<path d="M9 2v6l-6 10a2 2 0 0 0 1.7 3h14.6a2 2 0 0 0 1.7-3L15 8V2"/><path d="M9 2h6"/><path d="M7 15h10"/>' },
+  { name: 'student-account', label: 'My Account', icon: '<circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/>' },
+];
+
+// The phone bar stays short; the Sent lists are linked from Refer Student.
+// A student on a temporary password can only use My Account until it is changed.
+const lockTick = ref(0);
+const pwLocked = computed(() => {
+  lockTick.value; route.fullPath;
+  try { return !!JSON.parse(localStorage.getItem('student') || '{}')?.must_change_password; } catch { return false; }
+});
+const bumpLock = () => { lockTick.value++; };
+onMounted(() => window.addEventListener('student-pw-changed', bumpLock));
+onBeforeUnmount(() => window.removeEventListener('student-pw-changed', bumpLock));
+function lockClick(e, name) {
+  if (pwLocked.value && name !== 'student-account') e.preventDefault();
+}
+
+const tabItems = menuItems.filter(i => !['student-sent-referrals', 'student-sent-complaints'].includes(i.name));
+
+const pageTitle = computed(() => {
+  const titles = {
+    'student-dashboard':    'Dashboard',
+    'student-appointments': 'My Appointments',
+    'student-refer':        'Refer Myself',
+    'student-referrals':    'My Referrals',
+    'student-refer-choice': 'Refer Student',
+    'student-refer-other':  'Refer a Student',
+    'student-file-complaint': 'File a Complaint',
+    'student-sent-referrals': 'Sent Referrals',
+    'student-sent-complaints': 'Sent Complaints',
+    'student-testing':      'My Testing',
+    'student-account':      'My Account',
+    // Bug (10/30/2026): also missing, same "iCARE / iCARE" fallback bug.
+    'student-schedule-new': 'Schedule Appointment',
+    'student-notifications': 'Notifications',
+  };
+  // Bug (10/25/2026): Appointment Details and Referral Details had no entry
+  // here (their real title is a record code that only exists once it has
+  // loaded) and fell back to the generic "iCARE", showing "iCARE / iCARE".
+  // Each page publishes its code to pageSubtitle once it loads; this reads
+  // it back as the breadcrumb's extra segment.
+  if (route.name === 'student-appointment-show') {
+    return pageSubtitle.subtitle ? `Appointments / ${pageSubtitle.subtitle}` : 'Appointments';
+  }
+  if (route.name === 'student-referral-show') {
+    return pageSubtitle.subtitle ? `My Referrals / ${pageSubtitle.subtitle}` : 'My Referrals';
+  }
+  return titles[route.name] || 'iCARE';
+});
+
+const initials = computed(() => {
+  return ((student.value.first_name?.[0] || '') + (student.value.last_name?.[0] || '')).toUpperCase() || '?';
+});
+
+// A "fill out your forms" notification takes the student to My Account.
+function openNotification(n) {
+  markRead(n);
+  const target = studentNotificationTarget(n.data || {});
+  if (target) {
+    showNotifs.value = false;
+    router.push(target);
+  }
+}
+
+function viewAllNotifs() {
+  showNotifs.value = false;
+  router.push({ name: 'student-notifications' });
+}
+
+function isActive(name) {
+  if (name === 'student-refer-choice') return ['student-refer-choice', 'student-refer-other', 'student-file-complaint'].includes(route.name);
+  return route.name === name;
+}
+
+// B570: this used to just drop the token client-side without telling the
+// server - so a token that reached an idle timeout (SessionGuard) or an
+// explicit logout stayed valid and reusable server-side. Revoking it
+// first (same as the staff side's auth.logout()) actually ends the
+// session, not just this tab's memory of it.
+async function logout() {
+  try { await axios.post(`${API_BASE}/student/logout`, {}, authHeaders()); } catch (e) { /* revoke best-effort - still clear locally below */ }
+  localStorage.removeItem('student_token');
+  localStorage.removeItem('student');
+  router.push({ name: 'login-choice' });
+}
+
+let notifTimer = null;
+onMounted(() => {
+  fetchNotifications();
+  // The badge follows new notifications without a page refresh.
+  notifTimer = setInterval(fetchNotifications, 30000);
+});
+onBeforeUnmount(() => { if (notifTimer) clearInterval(notifTimer); });
+</script>

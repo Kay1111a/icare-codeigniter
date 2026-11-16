@@ -1,0 +1,1580 @@
+<template>
+  <div class="fade-up">
+    <div class="ph" style="margin-bottom:20px">
+      <h1>Management</h1>
+      <p>Manage Colleges, Programs, Departments, referral form options, school calendar, and document headers used across iCARE.</p>
+    </div>
+
+    <!-- Tabs -->
+    <div class="swipe-tabs" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button
+        v-for="t in tabs"
+        :key="t.key"
+        class="ibtn ibtn-sm"
+        :style="activeTab === t.key ? 'background:var(--moss);color:#fff' : 'background:var(--cloud);color:var(--stone)'"
+        @click="selectTab(t.key)"
+      >
+        {{ t.label }}
+      </button>
+    </div>
+
+    <!-- ============ COLLEGES ============ -->
+    <div v-if="activeTab === 'colleges'" class="icard">
+      <div class="icard-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <span class="icard-title">Colleges</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div class="mg-head-filter">
+          <input v-model="mgSearch" class="ifi" style="width:200px" maxlength="60" placeholder="Search..." />
+        <select v-model="mgStatus" class="fsm">
+          <option value="all">All Records</option>
+          <option value="active">Active</option>
+          <option value="inactive">Deactivated</option>
+          <option value="archived">Archived</option>
+        </select>
+        <button class="ibtn ibtn-o ibtn-sm" @click="resetMgFilter">Reset</button>
+        </div>
+        <button class="ibtn ibtn-p ibtn-sm" @click="openCollegeModal()">
+            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add College
+          </button>
+        </div>
+      </div>
+      <div v-if="loadingColleges" style="text-align:center;padding:44px">
+        <div style="width:24px;height:24px;border:2px solid var(--mint);border-top-color:var(--moss);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto"></div>
+      </div>
+      <div v-else-if="colleges.length === 0" class="empty-state">
+        <h3>No colleges yet</h3>
+        <p>Add one to get started.</p>
+      </div>
+      <div v-else-if="!visibleRows(colleges, 'name').length" class="empty-state">
+        <h3>No matching records</h3>
+        <p>Try a different status, or press Reset.</p>
+      </div>
+      <div class="ts" v-else>
+        <table class="itable">
+          <thead>
+            <tr><th>No.</th><th>Name</th><th>Abbrev.</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="(c, i) in visibleRows(colleges, 'name')" :key="c.id">
+              <td style="font-family:var(--mono);font-size:12px">{{ i + 1 }}</td>
+              <td>{{ c.name }}</td>
+              <td>{{ c.abbrev || '-' }}</td>
+              <td><span class="ibadge" :style="statusStyle(c.status)">{{ statusLabel(c.status) }}</span></td>
+              <td>
+                <div style="display:flex;gap:6px;justify-content:flex-end">
+                  <button class="ibtn ibtn-o ibtn-sm" :disabled="(c.status || 'active') !== 'active'" :title="(c.status || 'active') !== 'active' ? 'Reactivate to edit. Deactivated and archived records are read-only.' : ''" @click="openCollegeModal(c)">Edit</button>
+                  <button v-if="c.status === 'active'" class="ibtn ibtn-o ibtn-sm" @click="askStatus('colleges', c, c.name, 'inactive')">Deactivate</button>
+                  <button v-if="c.status !== 'archived'" class="ibtn ibtn-o ibtn-sm" @click="askStatus('colleges', c, c.name, 'archived')">Archive</button>
+                  <button v-if="c.status !== 'active'" class="ibtn ibtn-p ibtn-sm" @click="askStatus('colleges', c, c.name, 'active')">Reactivate</button>
+                  <button class="ibtn ibtn-sm" style="background:var(--red-lt);color:var(--red);border:1.5px solid #f5c0c0" @click="deleteCollege(c)">Delete</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ============ PROGRAMS ============ -->
+    <div v-if="activeTab === 'programs'" class="icard">
+      <div class="icard-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <span class="icard-title">Programs</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select v-model="programCollegeFilter" class="fsm" @change="fetchPrograms">
+            <option value="">All Colleges</option>
+            <option v-for="c in colleges" :key="c.id" :value="c.id">{{ c.name }}</option>
+          </select>
+          <div class="mg-head-filter">
+          <select v-model="mgStatus" class="fsm">
+            <option value="all">All Records</option>
+            <option value="active">Active</option>
+            <option value="inactive">Deactivated</option>
+            <option value="archived">Archived</option>
+          </select>
+          <button class="ibtn ibtn-o ibtn-sm" @click="resetMgFilter">Reset</button>
+          </div>
+          <button class="ibtn ibtn-p ibtn-sm" @click="openProgramModal()">
+            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Program
+          </button>
+        </div>
+      </div>
+      <div v-if="loadingPrograms" style="text-align:center;padding:44px">
+        <div style="width:24px;height:24px;border:2px solid var(--mint);border-top-color:var(--moss);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto"></div>
+      </div>
+      <div v-else-if="programs.length === 0" class="empty-state">
+        <h3>No programs found</h3>
+        <p>Add one, or add a College first.</p>
+      </div>
+      <div v-else-if="!visibleRows(programs, 'name').length" class="empty-state">
+        <h3>No matching records</h3>
+        <p>Try a different status, or press Reset.</p>
+      </div>
+      <div class="ts" v-else>
+        <table class="itable">
+          <thead>
+            <tr><th>No.</th><th>Name</th><th>College</th><th>Department</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="(p, i) in visibleRows(programs, 'name')" :key="p.id">
+              <td style="font-family:var(--mono);font-size:12px">{{ i + 1 }}</td>
+              <td>{{ p.name }}</td>
+              <td>{{ p.college?.name || '-' }}</td>
+              <td>{{ p.department?.name || '-' }}</td>
+              <td><span class="ibadge" :style="statusStyle(p.status)">{{ statusLabel(p.status) }}</span></td>
+              <td>
+                <div style="display:flex;gap:6px;justify-content:flex-end">
+                  <button class="ibtn ibtn-o ibtn-sm" :disabled="(p.status || 'active') !== 'active'" :title="(p.status || 'active') !== 'active' ? 'Reactivate to edit. Deactivated and archived records are read-only.' : ''" @click="openProgramModal(p)">Edit</button>
+                  <button v-if="p.status === 'active'" class="ibtn ibtn-o ibtn-sm" @click="askStatus('programs', p, p.name, 'inactive')">Deactivate</button>
+                  <button v-if="p.status !== 'archived'" class="ibtn ibtn-o ibtn-sm" @click="askStatus('programs', p, p.name, 'archived')">Archive</button>
+                  <button v-if="p.status !== 'active'" class="ibtn ibtn-p ibtn-sm" @click="askStatus('programs', p, p.name, 'active')">Reactivate</button>
+                  <button class="ibtn ibtn-sm" style="background:var(--red-lt);color:var(--red);border:1.5px solid #f5c0c0" @click="deleteProgram(p)">Delete</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ============ DEPARTMENTS ============ -->
+    <div v-if="activeTab === 'departments'" class="icard">
+      <div class="icard-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <span class="icard-title">Departments</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select v-model="departmentCollegeFilter" class="fsm" @change="fetchDepartments">
+            <option value="">All Colleges</option>
+            <option v-for="c in colleges" :key="c.id" :value="c.id">{{ c.name }}</option>
+          </select>
+          <div class="mg-head-filter">
+          <select v-model="mgStatus" class="fsm">
+            <option value="all">All Records</option>
+            <option value="active">Active</option>
+            <option value="inactive">Deactivated</option>
+            <option value="archived">Archived</option>
+          </select>
+          <button class="ibtn ibtn-o ibtn-sm" @click="resetMgFilter">Reset</button>
+          </div>
+          <button class="ibtn ibtn-p ibtn-sm" @click="openDepartmentModal()">
+            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Department
+          </button>
+        </div>
+      </div>
+      <div v-if="loadingDepartments" style="text-align:center;padding:44px">
+        <div style="width:24px;height:24px;border:2px solid var(--mint);border-top-color:var(--moss);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto"></div>
+      </div>
+      <div v-else-if="departments.length === 0" class="empty-state">
+        <h3>No departments found</h3>
+        <p>Add one, or add a College first.</p>
+      </div>
+      <div v-else-if="!visibleRows(departments, 'name').length" class="empty-state">
+        <h3>No matching records</h3>
+        <p>Try a different status, or press Reset.</p>
+      </div>
+      <div class="ts" v-else>
+        <table class="itable">
+          <thead>
+            <tr><th>No.</th><th>Name</th><th>College</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="(d, i) in visibleRows(departments, 'name')" :key="d.id">
+              <td style="font-family:var(--mono);font-size:12px">{{ i + 1 }}</td>
+              <td>{{ d.name }}</td>
+              <td>{{ d.college?.name || '-' }}</td>
+              <td><span class="ibadge" :style="statusStyle(d.status)">{{ statusLabel(d.status) }}</span></td>
+              <td>
+                <div style="display:flex;gap:6px;justify-content:flex-end">
+                  <button class="ibtn ibtn-o ibtn-sm" :disabled="(d.status || 'active') !== 'active'" :title="(d.status || 'active') !== 'active' ? 'Reactivate to edit. Deactivated and archived records are read-only.' : ''" @click="openDepartmentModal(d)">Edit</button>
+                  <button v-if="d.status === 'active'" class="ibtn ibtn-o ibtn-sm" @click="askStatus('departments', d, d.name, 'inactive')">Deactivate</button>
+                  <button v-if="d.status !== 'archived'" class="ibtn ibtn-o ibtn-sm" @click="askStatus('departments', d, d.name, 'archived')">Archive</button>
+                  <button v-if="d.status !== 'active'" class="ibtn ibtn-p ibtn-sm" @click="askStatus('departments', d, d.name, 'active')">Reactivate</button>
+                  <button class="ibtn ibtn-sm" style="background:var(--red-lt);color:var(--red);border:1.5px solid #f5c0c0" @click="deleteDepartment(d)">Delete</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ============ WELLNESS SERVICES (referral_type) ============ -->
+    <div v-if="activeTab === 'wellness'" class="icard">
+      <div class="icard-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <span class="icard-title">Wellness Services</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div class="mg-head-filter">
+          <input v-model="mgSearch" class="ifi" style="width:200px" maxlength="60" placeholder="Search..." />
+        <select v-model="mgStatus" class="fsm">
+          <option value="all">All Records</option>
+          <option value="active">Active</option>
+          <option value="inactive">Deactivated</option>
+          <option value="archived">Archived</option>
+        </select>
+        <button class="ibtn ibtn-o ibtn-sm" @click="resetMgFilter">Reset</button>
+        </div>
+        <button class="ibtn ibtn-p ibtn-sm" @click="openFormOptionModal()">
+            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Service
+          </button>
+        </div>
+      </div>
+      <div style="padding:12px 18px;font-size:12px;color:var(--fog);border-bottom:1px solid var(--cloud)">
+        Populates "Service Requested" on the Refer Student form (counseling, testing, and other non-disciplinary services). Each service is tagged GCU or TMDU so filters and queues route correctly. Editing a Label only changes how it displays - existing referrals keep their stored value.
+      </div>
+      <FormOptionTable
+        :loading="loadingFormOptions"
+        :options="visibleRows(formOptions, 'label')"
+        :show-unit="true"
+        @edit="openFormOptionModal"
+        @delete="deleteFormOption"
+        @status="(o, st) => askStatus('form-options', o, o.label, st)"
+      />
+    </div>
+
+    <!-- ============ DISCIPLINARY SERVICES / ACTS OF MISCONDUCT (act_of_misconduct) ============ -->
+    <div v-if="activeTab === 'disciplinary'" class="icard">
+      <div class="icard-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <span class="icard-title">Disciplinary Services (Acts of Misconduct)</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div class="mg-head-filter">
+          <input v-model="mgSearch" class="ifi" style="width:200px" maxlength="60" placeholder="Search..." />
+        <select v-model="mgStatus" class="fsm">
+          <option value="all">All Records</option>
+          <option value="active">Active</option>
+          <option value="inactive">Deactivated</option>
+          <option value="archived">Archived</option>
+        </select>
+        <button class="ibtn ibtn-o ibtn-sm" @click="resetMgFilter">Reset</button>
+        </div>
+        <button class="ibtn ibtn-p ibtn-sm" @click="openFormOptionModal()">
+            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Act of Misconduct
+          </button>
+        </div>
+      </div>
+      <div style="padding:12px 18px;font-size:12px;color:var(--fog);border-bottom:1px solid var(--cloud)">
+        Populates the Act of Misconduct list used when filing a Complaint / SDU referral. Editing a Label only changes how it displays - existing records keep their stored value.
+      </div>
+      <FormOptionTable
+        :loading="loadingFormOptions"
+        :options="visibleRows(formOptions, 'label')"
+        @edit="openFormOptionModal"
+        @delete="deleteFormOption"
+        @status="(o, st) => askStatus('form-options', o, o.label, st)"
+      />
+    </div>
+
+    <!-- ============ REFERRAL SOURCES (referral_source) ============ -->
+    <div v-if="activeTab === 'sources'" class="icard">
+      <div class="icard-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <span class="icard-title">Referral Sources</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div class="mg-head-filter">
+          <input v-model="mgSearch" class="ifi" style="width:200px" maxlength="60" placeholder="Search..." />
+        <select v-model="mgStatus" class="fsm">
+          <option value="all">All Records</option>
+          <option value="active">Active</option>
+          <option value="inactive">Deactivated</option>
+          <option value="archived">Archived</option>
+        </select>
+        <button class="ibtn ibtn-o ibtn-sm" @click="resetMgFilter">Reset</button>
+        </div>
+        <button class="ibtn ibtn-p ibtn-sm" @click="openFormOptionModal()">
+            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Source
+          </button>
+        </div>
+      </div>
+      <div style="padding:12px 18px;font-size:12px;color:var(--fog);border-bottom:1px solid var(--cloud)">
+        Populates "Referral Source" on the Refer Student form. Editing a Label only changes how it displays - existing referrals keep their stored value.
+      </div>
+      <FormOptionTable
+        :loading="loadingFormOptions"
+        :options="visibleRows(formOptions, 'label')"
+        @edit="openFormOptionModal"
+        @delete="deleteFormOption"
+        @status="(o, st) => askStatus('form-options', o, o.label, st)"
+      />
+    </div>
+
+    <!-- ============ SCHOOL CALENDAR ============ -->
+    <div v-if="activeTab === 'calendar'" class="icard">
+      <div class="icard-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <span class="icard-title">School Calendar (Academic Years)</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div class="mg-head-filter">
+          <input v-model="mgSearch" class="ifi" style="width:200px" maxlength="60" placeholder="Search academic year..." />
+        <select v-model="mgStatus" class="fsm">
+          <option value="all">All Records</option>
+          <option value="active">Active</option>
+          <option value="inactive">Deactivated</option>
+          <option value="archived">Archived</option>
+        </select>
+        <button class="ibtn ibtn-o ibtn-sm" @click="resetMgFilter">Reset</button>
+        </div>
+        <button class="ibtn ibtn-p ibtn-sm" @click="openAyModal()">
+            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Academic Year
+          </button>
+        </div>
+      </div>
+      <div style="padding:12px 16px;font-size:12px;color:var(--stone);border-bottom:1px solid var(--cloud)">
+        These dates drive the Academic Year and Semester options on the Reports page. The term marked Current is the one Reports opens on by default.
+      </div>
+      <div v-if="loadingAy" style="text-align:center;padding:44px">
+        <div style="width:24px;height:24px;border:2px solid var(--mint);border-top-color:var(--moss);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto"></div>
+      </div>
+      <div v-else-if="academicYears.length === 0" class="empty-state">
+        <h3>No academic years yet</h3>
+        <p>Add one to set the school calendar. Until then, Reports uses Aug 1 - Jul 31.</p>
+      </div>
+      <div v-else-if="!visibleRows(academicYears, 'start_year').length" class="empty-state">
+        <h3>No matching records</h3>
+        <p>Try a different status, or press Reset.</p>
+      </div>
+      <div class="ts" v-else>
+        <table class="itable">
+          <thead>
+            <tr><th>Academic Year</th><th>Year Dates</th><th>1st Semester</th><th>2nd Semester</th><th>Midyear</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="a in visibleRows(academicYears, 'start_year')" :key="a.id">
+              <td style="font-weight:600">
+                {{ a.start_year }}-{{ a.start_year + 1 }}
+                <span v-if="a.is_current" class="ibadge" style="background:var(--moss);color:#fff;margin-left:6px">Current</span>
+              </td>
+              <td>{{ ayRange(a.year_start, a.year_end) }}</td>
+              <td>{{ ayRange(a.first_sem_start, a.first_sem_end) }}</td>
+              <td>{{ ayRange(a.second_sem_start, a.second_sem_end) }}</td>
+              <td>{{ ayRange(a.midyear_start, a.midyear_end) }}</td>
+              <td><span class="ibadge" :style="statusStyle(a.status)">{{ statusLabel(a.status) }}</span></td>
+              <td>
+                <div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">
+                  <button v-if="(a.status || 'active') === 'active' && !a.is_current" class="ibtn ibtn-p ibtn-sm" @click="setCurrentTerm(a)">Set as Current</button>
+                  <button class="ibtn ibtn-o ibtn-sm" :disabled="(a.status || 'active') !== 'active'" :title="(a.status || 'active') !== 'active' ? 'Reactivate to edit. Deactivated and archived records are read-only.' : ''" @click="openAyModal(a)">Edit</button>
+                  <button v-if="(a.status || 'active') === 'active'" class="ibtn ibtn-o ibtn-sm" @click="askStatus('academic-years', a, a.start_year + '-' + (a.start_year + 1), 'inactive')">Deactivate</button>
+                  <button v-if="a.status !== 'archived'" class="ibtn ibtn-o ibtn-sm" @click="askStatus('academic-years', a, a.start_year + '-' + (a.start_year + 1), 'archived')">Archive</button>
+                  <button v-if="(a.status || 'active') !== 'active'" class="ibtn ibtn-p ibtn-sm" @click="askStatus('academic-years', a, a.start_year + '-' + (a.start_year + 1), 'active')">Reactivate</button>
+                  <button class="ibtn ibtn-sm" style="background:var(--red-lt);color:var(--red);border:1.5px solid #f5c0c0" @click="openDeleteConfirm('academicYear', a, a.start_year + '-' + (a.start_year + 1))">Delete</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- B547: sharing this tab's own academicYears list (instead of letting the
+         child fetch its own) means "Set as Current" below updates the Holidays
+         and Suspensions filtering/defaults immediately - no second fetch, no
+         manual refresh. -->
+    <HolidaysSuspensions v-if="activeTab === 'calendar'" :can-manage="isAdmin" :academic-years="academicYears" style="margin-top:16px" />
+
+    <!-- ============ DOCUMENT HEADERS ============ -->
+    <div v-if="activeTab === 'documents'" style="display:flex;flex-direction:column;gap:16px">
+      <div v-if="!isAdmin" style="background:var(--amber-lt);border:1px solid var(--amber);border-radius:var(--r-sm);padding:10px 12px;font-size:12px;color:var(--amber)">
+        GCU's document headers are edited by the GCU Head (Admin). TMDU's header is edited by the System Admin. You can view the current values below.
+      </div>
+
+      <!-- Each unit manages its own document headers -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button v-for="u in docUnits" :key="u.key" class="ibtn ibtn-sm" :class="docUnit === u.key ? 'ibtn-p' : 'ibtn-o'" @click="docUnit = u.key">{{ u.label }}</button>
+      </div>
+
+      <!-- TMDU Appointment Slip (QF-TMDU-02) - shown on Schedule Test Taking and Schedule PAR Release -->
+      <div v-if="docUnit === 'TMDU'" class="icard">
+        <div class="icard-header"><span class="icard-title">Appointment Slip (QF-TMDU-02)</span></div>
+        <div class="icard-body">
+          <div v-if="docError.tmduSlip" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px;margin-bottom:12px">{{ docError.tmduSlip }}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div>
+              <label class="ifl">Document Code</label>
+              <input class="ifi" value="QF-TMDU-02" disabled />
+            </div>
+            <div>
+              <label class="ifl">Revision No.</label>
+              <input v-model="tmduSlipDoc.revision_no" class="ifi" placeholder="e.g. 00" maxlength="4" @input="tmduSlipDoc.revision_no = String(tmduSlipDoc.revision_no ?? '').replace(/\D/g, '')" :disabled="!isSystemAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Effectivity Date</label>
+              <input v-model="tmduSlipDoc.effectivity_date" type="date" class="ifi" :disabled="!isSystemAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Ctrl No. - Year <span style="color:var(--fog)">(optional)</span></label>
+              <input v-model="tmduSlipDoc.ctrl_no_year" class="ifi" placeholder="e.g. 26" maxlength="4" @input="tmduSlipDoc.ctrl_no_year = String(tmduSlipDoc.ctrl_no_year ?? '').replace(/\D/g, '')" :disabled="!isSystemAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Ctrl No. - Term <span style="color:var(--fog)">(optional)</span></label>
+              <select v-model="tmduSlipDoc.ctrl_no_term" class="ifse" :disabled="!isSystemAdmin">
+                <option value="">None</option>
+                <option value="1">1 (First Sem)</option>
+                <option value="2">2 (Second Sem)</option>
+                <option value="S">S (Summer / Mid-Year)</option>
+              </select>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--fog);margin-top:10px">Shown on the Schedule Test Taking and Schedule PAR Release cards in a testing record. The Ctrl No. is blank on the printed slip, so it can stay empty.</div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button v-if="isSystemAdmin" class="ibtn ibtn-p ibtn-sm" :disabled="savingDoc.tmduSlip" @click="openDocPreview('QF-TMDU-02', tmduSlipDoc, 'tmduSlip', 'Appointment Slip')">
+              {{ savingDoc.tmduSlip ? 'Saving...' : 'Preview &amp; Save as New Version' }}
+            </button>
+            <button v-if="isSystemAdmin" class="ibtn ibtn-o ibtn-sm" @click="openVersions('QF-TMDU-02', 'Appointment Slip', tmduSlipDoc)">Version History</button>
+          </div>
+        </div>
+      </div>
+
+      <template v-if="docUnit === 'GCU'">
+      <!-- Referral Slip (QF-OSS-01) -->
+      <div class="icard">
+        <div class="icard-header"><span class="icard-title">Referral Slip / Form (QF-OSS-01)</span></div>
+        <div class="icard-body">
+          <div v-if="docError.referral" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px;margin-bottom:12px">{{ docError.referral }}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div>
+              <label class="ifl">Revision No.</label>
+              <input v-model="referralDoc.revision_no" class="ifi" placeholder="e.g. 01" maxlength="4" @input="referralDoc.revision_no = String(referralDoc.revision_no ?? '').replace(/\D/g, '')" :disabled="!isAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Effectivity Date</label>
+              <input v-model="referralDoc.effectivity_date" type="date" class="ifi" :disabled="!isAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Ctrl No. - Year</label>
+              <input v-model="referralDoc.ctrl_no_year" class="ifi" placeholder="e.g. 26" maxlength="4" @input="referralDoc.ctrl_no_year = String(referralDoc.ctrl_no_year ?? '').replace(/\D/g, '')" :disabled="!isAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Ctrl No. - Term</label>
+              <select v-model="referralDoc.ctrl_no_term" class="ifse" :disabled="!isAdmin">
+                <option value="1">1 (First Sem)</option>
+                <option value="2">2 (Second Sem)</option>
+                <option value="S">S (Summer / Mid-Year)</option>
+              </select>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--fog);margin-top:10px">Applies to all referral forms, current and future.</div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button v-if="isAdmin" class="ibtn ibtn-p ibtn-sm" :disabled="savingDoc.referral" @click="openDocPreview('QF-OSS-01', referralDoc, 'referral', 'Referral Slip')">
+              {{ savingDoc.referral ? 'Saving...' : 'Preview &amp; Save as New Version' }}
+            </button>
+            <button v-if="isAdmin" class="ibtn ibtn-o ibtn-sm" @click="openVersions('QF-OSS-01', 'Referral Slip', referralDoc)">Version History</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feedback Slip (QF-OSS-03) -->
+      <div class="icard">
+        <div class="icard-header"><span class="icard-title">Feedback Slip (QF-OSS-03)</span></div>
+        <div class="icard-body">
+          <div v-if="docError.feedback" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px;margin-bottom:12px">{{ docError.feedback }}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div>
+              <label class="ifl">Revision No.</label>
+              <input v-model="feedbackDoc.revision_no" class="ifi" placeholder="e.g. 01" maxlength="4" @input="feedbackDoc.revision_no = String(feedbackDoc.revision_no ?? '').replace(/\D/g, '')" :disabled="!isAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Effectivity Date</label>
+              <input v-model="feedbackDoc.effectivity_date" type="date" class="ifi" :disabled="!isAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Ctrl No. - Year</label>
+              <input v-model="feedbackDoc.ctrl_no_year" class="ifi" placeholder="e.g. 26" maxlength="4" @input="feedbackDoc.ctrl_no_year = String(feedbackDoc.ctrl_no_year ?? '').replace(/\D/g, '')" :disabled="!isAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Ctrl No. - Term</label>
+              <select v-model="feedbackDoc.ctrl_no_term" class="ifse" :disabled="!isAdmin">
+                <option value="1">1 (First Sem)</option>
+                <option value="2">2 (Second Sem)</option>
+                <option value="S">S (Summer / Mid-Year)</option>
+              </select>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--fog);margin-top:10px">Applies to all feedback slips, current and future.</div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button v-if="isAdmin" class="ibtn ibtn-p ibtn-sm" :disabled="savingDoc.feedback" @click="openDocPreview('QF-OSS-03', feedbackDoc, 'feedback', 'Feedback Slip')">
+              {{ savingDoc.feedback ? 'Saving...' : 'Preview &amp; Save as New Version' }}
+            </button>
+            <button v-if="isAdmin" class="ibtn ibtn-o ibtn-sm" @click="openVersions('QF-OSS-03', 'Feedback Slip', feedbackDoc)">Version History</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Student Information Sheet (QF-OSS-GCU-01) -->
+      <div class="icard">
+        <div class="icard-header"><span class="icard-title">Student Information Sheet (QF-OSS-GCU-01)</span></div>
+        <div class="icard-body">
+          <div v-if="docError.sif" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px;margin-bottom:12px">{{ docError.sif }}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div>
+              <label class="ifl">Revision No.</label>
+              <input v-model="sifDoc.revision_no" class="ifi" placeholder="e.g. 01" maxlength="4" @input="sifDoc.revision_no = String(sifDoc.revision_no ?? '').replace(/\D/g, '')" :disabled="!isAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Effectivity Date</label>
+              <input v-model="sifDoc.effectivity_date" type="date" class="ifi" :disabled="!isAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Ctrl No. - Year</label>
+              <input v-model="sifDoc.ctrl_no_year" class="ifi" placeholder="e.g. 26" maxlength="4" @input="sifDoc.ctrl_no_year = String(sifDoc.ctrl_no_year ?? '').replace(/\D/g, '')" :disabled="!isAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Ctrl No. - Term</label>
+              <select v-model="sifDoc.ctrl_no_term" class="ifse" :disabled="!isAdmin">
+                <option value="1">1 (First Sem)</option>
+                <option value="2">2 (Second Sem)</option>
+                <option value="S">S (Summer / Mid-Year)</option>
+              </select>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--fog);margin-top:10px">Shown at the top of the Student Information card in Case Files. The full Ctrl No. is Year-Term-Client No. (e.g. 26-1-0012); the client no. at the end is set per student on their record.</div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button v-if="isAdmin" class="ibtn ibtn-p ibtn-sm" :disabled="savingDoc.sif" @click="openDocPreview('QF-OSS-GCU-01', sifDoc, 'sif', 'Student Information File')">
+              {{ savingDoc.sif ? 'Saving...' : 'Preview &amp; Save as New Version' }}
+            </button>
+            <button v-if="isAdmin" class="ibtn ibtn-o ibtn-sm" @click="openVersions('QF-OSS-GCU-01', 'Student Information File', sifDoc)">Version History</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Class Admission Slip (QF-OSS-GCU-09) -->
+      <div class="icard">
+        <div class="icard-header"><span class="icard-title">Class Admission Slip (QF-OSS-GCU-09)</span></div>
+        <div class="icard-body">
+          <div v-if="docError.admission" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px;margin-bottom:12px">{{ docError.admission }}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div>
+              <label class="ifl">Document Code</label>
+              <input class="ifi" value="QF-OSS-GCU-09" disabled />
+            </div>
+            <div>
+              <label class="ifl">Revision No.</label>
+              <input v-model="admissionDoc.revision_no" class="ifi" placeholder="e.g. 01" maxlength="4" @input="admissionDoc.revision_no = String(admissionDoc.revision_no ?? '').replace(/\D/g, '')" :disabled="!isAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Effectivity Date</label>
+              <input v-model="admissionDoc.effectivity_date" type="date" class="ifi" :disabled="!isAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Ctrl No. - Year</label>
+              <input v-model="admissionDoc.ctrl_no_year" class="ifi" placeholder="e.g. 26" maxlength="4" @input="admissionDoc.ctrl_no_year = String(admissionDoc.ctrl_no_year ?? '').replace(/\D/g, '')" :disabled="!isAdmin" />
+            </div>
+            <div>
+              <label class="ifl">Ctrl No. - Term</label>
+              <select v-model="admissionDoc.ctrl_no_term" class="ifse" :disabled="!isAdmin">
+                <option value="1">1 (First Sem)</option>
+                <option value="2">2 (Second Sem)</option>
+                <option value="S">S (Summer / Mid-Year)</option>
+              </select>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--fog);margin-top:10px">Shown at the top of the Admission Slip on Class Attendance referrals.</div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button v-if="isAdmin" class="ibtn ibtn-p ibtn-sm" :disabled="savingDoc.admission" @click="openDocPreview('QF-OSS-GCU-09', admissionDoc, 'admission', 'Admission Slip')">
+              {{ savingDoc.admission ? 'Saving...' : 'Preview &amp; Save as New Version' }}
+            </button>
+            <button v-if="isAdmin" class="ibtn ibtn-o ibtn-sm" @click="openVersions('QF-OSS-GCU-09', 'Admission Slip', admissionDoc)">Version History</button>
+          </div>
+        </div>
+      </div>
+      </template>
+    </div>
+
+    <!-- ============ Academic Year Modal ============ -->
+    <div v-if="showAyModal" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="closeModal('ay')">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:520px;max-height:92vh;overflow:auto;box-shadow:var(--sh-lg)">
+        <div style="padding:20px 22px;border-bottom:1px solid var(--cloud)">
+          <div style="font-size:15px;font-weight:600;color:var(--ink)">{{ ayForm.id ? 'Edit Academic Year' : 'Add Academic Year' }}</div>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+          <div v-if="ayError" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px">{{ ayError }}</div>
+          <div>
+            <label class="ifl">Starting Year <span style="color:var(--red)">*</span></label>
+            <input v-model="ayForm.start_year" class="ifi" maxlength="4" placeholder="e.g. 2026" @input="onAyYearInput" />
+            <div style="font-size:11px;color:var(--fog);margin-top:4px">{{ ayForm.start_year && String(ayForm.start_year).length === 4 ? 'A.Y. ' + ayForm.start_year + '-' + (Number(ayForm.start_year) + 1) : 'Type the year the academic year starts.' }}</div>
+          </div>
+          <div v-for="g in AY_GROUPS" :key="g.key" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div style="grid-column:1 / -1;font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--fog)">{{ g.label }}</div>
+            <div>
+              <label class="ifl">Start <span style="color:var(--red)">*</span></label>
+              <input v-model="ayForm[g.key + '_start']" type="date" class="ifi" />
+            </div>
+            <div>
+              <label class="ifl">End <span style="color:var(--red)">*</span></label>
+              <input v-model="ayForm[g.key + '_end']" type="date" class="ifi" />
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px">
+            <button class="ibtn ibtn-p" :disabled="!ayValid || savingAy" @click="askSave(ayForm.id, saveAy)">
+              {{ savingAy ? 'Saving...' : (ayForm.id ? 'Save Changes' : 'Add Academic Year') }}
+            </button>
+            <button class="ibtn ibtn-o" @click="closeModal('ay')">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ College Modal ============ -->
+    <div v-if="showCollegeModal" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="closeModal('college')">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:420px;overflow:hidden;box-shadow:var(--sh-lg)">
+        <div style="padding:20px 22px;border-bottom:1px solid var(--cloud)">
+          <div style="font-size:15px;font-weight:600;color:var(--ink)">{{ collegeForm.id ? 'Edit College' : 'Add College' }}</div>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+          <div v-if="collegeError" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px">{{ collegeError }}</div>
+          <div>
+            <label class="ifl">Name <span style="color:var(--red)">*</span></label>
+            <input v-model="collegeForm.name" class="ifi" maxlength="150" placeholder="e.g. College of Engineering (CE)" @input="collegeForm.name = capFirst(String(collegeForm.name ?? '').replace(/[^a-zA-ZÀ-ɏ'.,\x26()\- ]/g, ''))" />
+            <div v-if="!collegeForm.name.trim() && collegeTouched" style="font-size:11px;color:var(--red);margin-top:4px">Please fill in this field.</div>
+          </div>
+          <div>
+            <label class="ifl">Abbreviation</label>
+            <input v-model="collegeForm.abbrev" class="ifi" maxlength="20" placeholder="e.g. CE" @input="collegeForm.abbrev = String(collegeForm.abbrev ?? '').replace(/[^a-zA-ZÀ-ɏ'.,\x26()\- ]/g, '').toUpperCase()" />
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px">
+            <button class="ibtn ibtn-p" :disabled="!collegeForm.name.trim() || savingCollege" @click="collegeTouched = true; askSave(collegeForm.id, saveCollege)">
+              {{ savingCollege ? 'Saving...' : (collegeForm.id ? 'Save Changes' : 'Add College') }}
+            </button>
+            <button class="ibtn ibtn-o" @click="closeModal('college')">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ Program Modal ============ -->
+    <div v-if="showProgramModal" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="closeModal('program')">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:420px;overflow:hidden;box-shadow:var(--sh-lg)">
+        <div style="padding:20px 22px;border-bottom:1px solid var(--cloud)">
+          <div style="font-size:15px;font-weight:600;color:var(--ink)">{{ programForm.id ? 'Edit Program' : 'Add Program' }}</div>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+          <div v-if="programError" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px">{{ programError }}</div>
+          <div>
+            <label class="ifl">College <span style="color:var(--red)">*</span></label>
+            <select v-model="programForm.college_id" class="ifse" @change="programForm.department_id = ''">
+              <option value="" disabled hidden>Select college...</option>
+              <option v-for="c in colleges" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="ifl">Program Name <span style="color:var(--red)">*</span></label>
+            <input v-model="programForm.name" class="ifi" maxlength="150" placeholder="e.g. Bachelor of Science in Information Technology" @input="programForm.name = capFirst(String(programForm.name ?? '').replace(/[^a-zA-ZÀ-ɏ'.,\x26()\- ]/g, ''))" />
+            <div v-if="programTouched && !programForm.name.trim()" style="font-size:11px;color:var(--red);margin-top:4px">Please fill in this field.</div>
+            <div v-if="programTouched && !programForm.college_id" style="font-size:11px;color:var(--red);margin-top:4px">Please select a college.</div>
+          </div>
+          <div>
+            <label class="ifl">Department</label>
+            <select v-model="programForm.department_id" class="ifse" :disabled="!programForm.college_id">
+              <option value="">None</option>
+              <option v-for="d in programModalDepartments" :key="d.id" :value="d.id">{{ d.name }}</option>
+            </select>
+            <div style="font-size:11px;color:var(--fog);margin-top:4px">Used to match this program to its Department Chair and Faculty.</div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px">
+            <button class="ibtn ibtn-p" :disabled="!programForm.college_id || !programForm.name.trim() || savingProgram" @click="programTouched = true; askSave(programForm.id, saveProgram)">
+              {{ savingProgram ? 'Saving...' : (programForm.id ? 'Save Changes' : 'Add Program') }}
+            </button>
+            <button class="ibtn ibtn-o" @click="closeModal('program')">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ Department Modal ============ -->
+    <div v-if="showDepartmentModal" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="closeModal('department')">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:420px;overflow:hidden;box-shadow:var(--sh-lg)">
+        <div style="padding:20px 22px;border-bottom:1px solid var(--cloud)">
+          <div style="font-size:15px;font-weight:600;color:var(--ink)">{{ departmentForm.id ? 'Edit Department' : 'Add Department' }}</div>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+          <div v-if="departmentError" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px">{{ departmentError }}</div>
+          <div>
+            <label class="ifl">College <span style="color:var(--red)">*</span></label>
+            <select v-model="departmentForm.college_id" class="ifse">
+              <option value="" disabled hidden>Select college...</option>
+              <option v-for="c in colleges" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="ifl">Department Name <span style="color:var(--red)">*</span></label>
+            <input v-model="departmentForm.name" class="ifi" maxlength="150" placeholder="e.g. Information Technology" @input="departmentForm.name = capFirst(String(departmentForm.name ?? '').replace(/[^a-zA-ZÀ-ɏ'.,\x26()\- ]/g, ''))" />
+            <div v-if="departmentTouched && !departmentForm.name.trim()" style="font-size:11px;color:var(--red);margin-top:4px">Please fill in this field.</div>
+            <div v-if="departmentTouched && !departmentForm.college_id" style="font-size:11px;color:var(--red);margin-top:4px">Please select a college.</div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px">
+            <button class="ibtn ibtn-p" :disabled="!departmentForm.college_id || !departmentForm.name.trim() || savingDepartment" @click="departmentTouched = true; askSave(departmentForm.id, saveDepartment)">
+              {{ savingDepartment ? 'Saving...' : (departmentForm.id ? 'Save Changes' : 'Add Department') }}
+            </button>
+            <button class="ibtn ibtn-o" @click="closeModal('department')">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ Form Option Modal (shared by Wellness / Disciplinary / Sources) ============ -->
+    <div v-if="showFormOptionModal" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="closeModal('formOption')">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:420px;overflow:hidden;box-shadow:var(--sh-lg)">
+        <div style="padding:20px 22px;border-bottom:1px solid var(--cloud)">
+          <div style="font-size:15px;font-weight:600;color:var(--ink)">{{ formOptionForm.id ? 'Edit' : 'Add' }} {{ formOptionModalNoun }}</div>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+          <div v-if="formOptionError" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:8px 12px;border-radius:var(--r-sm);font-size:12px">{{ formOptionError }}</div>
+          <div>
+            <label class="ifl">Label <span style="color:var(--red)">*</span></label>
+            <input v-model="formOptionForm.label" class="ifi" maxlength="150" placeholder="What staff will see in the dropdown" @input="formOptionForm.label = capFirst(String(formOptionForm.label ?? '').replace(/[^a-zA-ZÀ-ɏ'.,\x26()\- ]/g, ''))" />
+            <div v-if="formOptionTouched && !formOptionForm.label.trim()" style="font-size:11px;color:var(--red);margin-top:4px">Please fill in this field.</div>
+          </div>
+          <div v-if="activeTab === 'wellness'">
+            <label class="ifl">Unit <span style="color:var(--red)">*</span></label>
+            <select v-model="formOptionForm.unit" class="ifse">
+              <option value="" disabled hidden>Select unit...</option>
+              <option value="GCU">GCU</option>
+              <option value="TMDU">TMDU</option>
+            </select>
+            <div style="font-size:11px;color:var(--stone);margin-top:4px">Which unit handles this service. Referrals to TMDU still go through GCU first - this tag only controls where the service shows up in filters and queues.</div>
+            <div v-if="formOptionTouched && activeTab === 'wellness' && !formOptionForm.unit" style="font-size:11px;color:var(--red);margin-top:4px">Please select a unit.</div>
+          </div>
+          <div v-if="!formOptionForm.id">
+            <label class="ifl">Stored Value <span style="color:var(--red)">*</span></label>
+            <input
+              v-model="formOptionForm.value"
+              class="ifi"
+              maxlength="50"
+              placeholder="e.g. counseling"
+              @input="formOptionForm.value = formOptionForm.value.replace(/[^a-zA-Z0-9_]/g, '')"
+            />
+            <div style="font-size:11px;color:var(--stone);margin-top:4px">A short internal code (letters, numbers, underscores only). This gets stored on records and can't be changed later.</div>
+            <div v-if="formOptionTouched && !formOptionForm.value.trim()" style="font-size:11px;color:var(--red);margin-top:4px">Please fill in this field.</div>
+          </div>
+          <div v-else>
+            <label class="ifl">Stored Value</label>
+            <input class="ifi" :value="formOptionForm.value" disabled style="background:var(--snow);color:var(--stone)" />
+            <div style="font-size:11px;color:var(--stone);margin-top:4px">Not editable - existing records reference this value.</div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px">
+            <button class="ibtn ibtn-p" :disabled="!formOptionForm.label.trim() || (!formOptionForm.id && !formOptionForm.value.trim()) || (activeTab === 'wellness' && !formOptionForm.unit) || savingFormOption" @click="formOptionTouched = true; askSave(formOptionForm.id, saveFormOption)">
+              {{ savingFormOption ? 'Saving...' : (formOptionForm.id ? 'Save Changes' : 'Add') }}
+            </button>
+            <button class="ibtn ibtn-o" @click="closeModal('formOption')">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ Save Confirmation Modal ============ -->
+    <div v-if="showSaveConfirm" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:76;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="showSaveConfirm = false">
+      <div style="background:#fff;border-radius:var(--r-lg);width:100%;max-width:420px;overflow:hidden;box-shadow:var(--sh-lg)">
+        <div style="padding:20px 22px;border-bottom:1px solid var(--cloud)">
+          <div style="font-size:15px;font-weight:600;color:var(--ink)">Confirm Changes</div>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:14px">
+          <div style="font-size:13px;color:var(--slate);line-height:1.6">Are you sure you want to save these changes?</div>
+          <div style="display:flex;gap:8px">
+            <button class="ibtn ibtn-p" @click="confirmSave">Yes, Save</button>
+            <button class="ibtn ibtn-o" @click="showSaveConfirm = false">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ Document header: preview before saving a new version ============ -->
+    <div v-if="docPreview" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:76;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="docPreview = null">
+      <div style="background:#fff;border-radius:var(--r);max-width:460px;width:100%;padding:22px">
+        <div style="font-weight:700;font-size:15px;margin-bottom:6px">Preview header: {{ docPreview.label }}</div>
+        <div style="font-size:12px;color:var(--fog);margin-bottom:12px">This is how the header will read on new documents.</div>
+        <div style="border:1px solid var(--line, #ddd);border-radius:var(--r-sm);padding:12px 14px;font-size:12px;line-height:1.7;background:#fafafa">
+          <div><strong>Document Code:</strong> {{ docPreview.code }}</div>
+          <div><strong>Revision No.:</strong> {{ docPreview.form.revision_no || '-' }}</div>
+          <div><strong>Effectivity Date:</strong> {{ docPreview.form.effectivity_date || '-' }}</div>
+          <div><strong>Ctrl No.:</strong> {{ docPreview.ctrl || '-' }}</div>
+        </div>
+        <div style="font-size:12px;color:var(--ink-2, #555);margin-top:12px">Saving creates a <strong>new version</strong> and makes it the active header. Documents already generated keep the header they were made with.</div>
+        <div v-if="docPreview.error" style="color:var(--red);font-size:12px;margin-top:8px">{{ docPreview.error }}</div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+          <button class="ibtn ibtn-p" :disabled="savingDoc[docPreview.key]" @click="confirmDocPreview">{{ savingDoc[docPreview.key] ? 'Saving...' : 'Save as New Version' }}</button>
+          <button class="ibtn ibtn-o" @click="docPreview = null">Back to Edit</button>
+        </div>
+      </div>
+    </div>
+
+    <DocumentHeaderVersions
+      v-if="versionsFor"
+      :code="versionsFor.code"
+      :label="versionsFor.label"
+      @close="versionsFor = null"
+      @changed="reloadDoc(versionsFor.target, versionsFor.code)"
+    />
+
+    <!-- ============ Deactivate / Archive / Reactivate (reason required) ============ -->
+    <ReasonDialog
+      :open="!!statusAsk"
+      :title="statusAsk?.title || ''"
+      :message="statusAsk?.message || ''"
+      :reasons="statusReasons"
+      reason-label="Reason"
+      :confirm-text="statusAsk?.confirm || 'Confirm'"
+      :danger="statusAsk?.status !== 'active'"
+      :blocked-message="statusAsk?.blocked || ''"
+      :busy="statusBusy"
+      :error="statusError"
+      @confirm="doStatus"
+      @cancel="statusAsk = null"
+    />
+
+    <!-- ============ Delete Confirmation (reason required) ============ -->
+    <ReasonDialog
+      :open="showDeleteConfirm"
+      title="Delete?"
+      :message="deleteMessage"
+      :reasons="deleteReasons"
+      reason-label="Reason for Deletion"
+      confirm-text="Yes, Delete"
+      other-placeholder="Please describe the reason for deletion briefly."
+      :blocked-message="deleteBlocked"
+      :busy="deleting"
+      :error="deleteError"
+      @confirm="doConfirmedDelete"
+      @cancel="showDeleteConfirm = false"
+    />
+
+  </div>
+</template>
+
+<script setup>
+import { ref, inject, computed, onMounted, h } from 'vue';
+import axios from 'axios';
+import { useAuthStore } from '../../stores/auth';
+import ReasonDialog from '../../components/ReasonDialog.vue';
+import HolidaysSuspensions from '../../components/HolidaysSuspensions.vue';
+import DocumentHeaderVersions from '../../components/DocumentHeaderVersions.vue';
+import { MANAGEMENT_DELETE_REASONS, MANAGEMENT_STATUS_REASONS } from '../../constants/accountReasons';
+
+const toast = inject('toast');
+const confirmDiscard = inject('confirmDiscard', null);
+const auth  = useAuthStore();
+const API_BASE = `${import.meta.env.VITE_API_URL || ''}/api`;
+
+function authHeaders() {
+  return { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+}
+
+// Document Headers are admin-only to edit (route:role:admin on the backend);
+// system_admin can view Management but not save these.
+const isAdmin = computed(() => auth.user?.role === 'admin');
+const isSystemAdmin = computed(() => auth.user?.role === 'system_admin');
+
+// Document Headers are grouped per unit. SDU uses a single document, so it has no tab here.
+// The GCU Head (Admin) sees and edits only GCU's document headers; TMDU's
+// header belongs to TMDU and is kept by the System Admin.
+const docUnits = computed(() => isAdmin.value
+  ? [{ key: 'GCU', label: 'GCU' }]
+  : [{ key: 'GCU', label: 'GCU' }, { key: 'TMDU', label: 'TMDU' }]);
+const docUnit = ref('GCU');
+
+// B#, 11/4/2026: the "Disciplinary Services" tab button is removed from
+// this list per request - its content block (activeTab === 'disciplinary'
+// below), the TAB_CATEGORY mapping and everything else behind it are left
+// in place untouched. Nothing currently switches activeTab to
+// 'disciplinary' with the button gone, so that content is simply
+// unreachable through the UI now, not deleted.
+const tabs = [
+  { key: 'colleges',     label: 'Colleges' },
+  { key: 'programs',     label: 'Programs' },
+  { key: 'departments',  label: 'Departments' },
+  { key: 'wellness',     label: 'Wellness Services' },
+  { key: 'sources',      label: 'Referral Sources' },
+  { key: 'calendar',     label: 'School Calendar' },
+  { key: 'documents',    label: 'Document Headers' },
+];
+const activeTab = ref('colleges');
+
+// Maps a tab key to its referral_form_options category.
+const TAB_CATEGORY = {
+  wellness:     'referral_type',
+  disciplinary: 'act_of_misconduct',
+  sources:      'referral_source',
+};
+const FORM_OPTION_NOUN = {
+  wellness:     'Wellness Service',
+  disciplinary: 'Act of Misconduct',
+  sources:      'Referral Source',
+};
+const formOptionModalNoun = computed(() => FORM_OPTION_NOUN[activeTab.value] || 'Option');
+
+// ---------- Colleges ----------
+const colleges = ref([]);
+const loadingColleges = ref(false);
+const showCollegeModal = ref(false);
+const collegeForm = ref({ id: null, name: '', abbrev: '' });
+const collegeError = ref('');
+const savingCollege = ref(false);
+const collegeTouched = ref(false);
+
+async function fetchColleges() {
+  loadingColleges.value = true;
+  try {
+    const res = await axios.get(`${API_BASE}/management/colleges`, authHeaders());
+    colleges.value = res.data;
+  } catch (e) {
+    console.error(e);
+  } finally {
+    loadingColleges.value = false;
+  }
+}
+
+function openCollegeModal(c) {
+  collegeForm.value = c ? { id: c.id, name: c.name, abbrev: c.abbrev || '' } : { id: null, name: '', abbrev: '' };
+  collegeError.value = '';
+  collegeTouched.value = false;
+  snapshot('college');
+  showCollegeModal.value = true;
+}
+
+async function saveCollege() {
+  collegeError.value = '';
+  savingCollege.value = true;
+  try {
+    if (collegeForm.value.id) {
+      await axios.put(`${API_BASE}/management/colleges/${collegeForm.value.id}`, collegeForm.value, authHeaders());
+    } else {
+      await axios.post(`${API_BASE}/management/colleges`, collegeForm.value, authHeaders());
+    }
+    toast?.success('College saved.');
+    showCollegeModal.value = false;
+    fetchColleges();
+  } catch (e) {
+    collegeError.value = e.response?.data?.message || 'Failed to save college.';
+  } finally {
+    savingCollege.value = false;
+  }
+}
+
+function deleteCollege(c) {
+  openDeleteConfirm('college', c, c.name);
+}
+
+// ---------- Programs ----------
+const programs = ref([]);
+const loadingPrograms = ref(false);
+const programCollegeFilter = ref('');
+const showProgramModal = ref(false);
+const programForm = ref({ id: null, college_id: '', department_id: '', name: '' });
+const programError = ref('');
+const savingProgram = ref(false);
+const programTouched = ref(false);
+
+// Only the chosen college's departments - department_id is cleared when the
+// college changes so a stale cross-college pick can never be submitted.
+const programModalDepartments = computed(() =>
+  departments.value.filter(d => d.college_id === programForm.value.college_id)
+);
+
+async function fetchPrograms() {
+  loadingPrograms.value = true;
+  try {
+    const params = programCollegeFilter.value ? { college_id: programCollegeFilter.value } : {};
+    const res = await axios.get(`${API_BASE}/management/programs`, { ...authHeaders(), params });
+    programs.value = res.data;
+  } catch (e) {
+    console.error(e);
+  } finally {
+    loadingPrograms.value = false;
+  }
+}
+
+function openProgramModal(p) {
+  programForm.value = p
+    ? { id: p.id, college_id: p.college_id, department_id: p.department_id || '', name: p.name }
+    : { id: null, college_id: '', department_id: '', name: '' };
+  programError.value = '';
+  programTouched.value = false;
+  snapshot('program');
+  showProgramModal.value = true;
+}
+
+async function saveProgram() {
+  programError.value = '';
+  savingProgram.value = true;
+  try {
+    if (programForm.value.id) {
+      await axios.put(`${API_BASE}/management/programs/${programForm.value.id}`, programForm.value, authHeaders());
+    } else {
+      await axios.post(`${API_BASE}/management/programs`, programForm.value, authHeaders());
+    }
+    toast?.success('Program saved.');
+    showProgramModal.value = false;
+    fetchPrograms();
+  } catch (e) {
+    programError.value = e.response?.data?.message || 'Failed to save program.';
+  } finally {
+    savingProgram.value = false;
+  }
+}
+
+function deleteProgram(p) {
+  openDeleteConfirm('program', p, p.name);
+}
+
+// ---------- Departments ----------
+const departments = ref([]);
+const loadingDepartments = ref(false);
+const departmentCollegeFilter = ref('');
+const showDepartmentModal = ref(false);
+const departmentForm = ref({ id: null, college_id: '', name: '' });
+const departmentError = ref('');
+const savingDepartment = ref(false);
+const departmentTouched = ref(false);
+
+async function fetchDepartments() {
+  loadingDepartments.value = true;
+  try {
+    const params = departmentCollegeFilter.value ? { college_id: departmentCollegeFilter.value } : {};
+    const res = await axios.get(`${API_BASE}/management/departments`, { ...authHeaders(), params });
+    departments.value = res.data;
+  } catch (e) {
+    console.error(e);
+  } finally {
+    loadingDepartments.value = false;
+  }
+}
+
+function openDepartmentModal(d) {
+  departmentForm.value = d ? { id: d.id, college_id: d.college_id, name: d.name } : { id: null, college_id: '', name: '' };
+  departmentError.value = '';
+  departmentTouched.value = false;
+  snapshot('department');
+  showDepartmentModal.value = true;
+}
+
+async function saveDepartment() {
+  departmentError.value = '';
+  savingDepartment.value = true;
+  try {
+    if (departmentForm.value.id) {
+      await axios.put(`${API_BASE}/management/departments/${departmentForm.value.id}`, departmentForm.value, authHeaders());
+    } else {
+      await axios.post(`${API_BASE}/management/departments`, departmentForm.value, authHeaders());
+    }
+    toast?.success('Department saved.');
+    showDepartmentModal.value = false;
+    fetchDepartments();
+  } catch (e) {
+    departmentError.value = e.response?.data?.message || 'Failed to save department.';
+  } finally {
+    savingDepartment.value = false;
+  }
+}
+
+function deleteDepartment(d) {
+  openDeleteConfirm('department', d, d.name);
+}
+
+// ---------- Wellness / Disciplinary / Referral Sources (all referral_form_options, split by category) ----------
+const formOptions = ref([]);
+const loadingFormOptions = ref(false);
+const showFormOptionModal = ref(false);
+const formOptionForm = ref({ id: null, category: 'referral_type', value: '', label: '', unit: '' });
+const formOptionError = ref('');
+const savingFormOption = ref(false);
+const formOptionTouched = ref(false);
+
+async function fetchFormOptions() {
+  const category = TAB_CATEGORY[activeTab.value];
+  if (!category) return;
+  loadingFormOptions.value = true;
+  try {
+    const res = await axios.get(`${API_BASE}/management/form-options`, { ...authHeaders(), params: { category } });
+    formOptions.value = res.data;
+  } catch (e) {
+    console.error(e);
+  } finally {
+    loadingFormOptions.value = false;
+  }
+}
+
+function openFormOptionModal(o) {
+  const category = TAB_CATEGORY[activeTab.value];
+  formOptionForm.value = o
+    ? { id: o.id, category: o.category, value: o.value, label: o.label, unit: o.unit || '' }
+    : { id: null, category, value: '', label: '', unit: '' };
+  formOptionError.value = '';
+  formOptionTouched.value = false;
+  snapshot('formOption');
+  showFormOptionModal.value = true;
+}
+
+async function saveFormOption() {
+  formOptionError.value = '';
+  savingFormOption.value = true;
+  try {
+    if (formOptionForm.value.id) {
+      const payload = { label: formOptionForm.value.label };
+      if (activeTab.value === 'wellness') payload.unit = formOptionForm.value.unit;
+      await axios.put(`${API_BASE}/management/form-options/${formOptionForm.value.id}`, payload, authHeaders());
+    } else {
+      await axios.post(`${API_BASE}/management/form-options`, formOptionForm.value, authHeaders());
+    }
+    toast?.success('Saved.');
+    showFormOptionModal.value = false;
+    fetchFormOptions();
+  } catch (e) {
+    formOptionError.value = e.response?.data?.message || 'Failed to save.';
+  } finally {
+    savingFormOption.value = false;
+  }
+}
+
+function deleteFormOption(o) {
+  openDeleteConfirm('formOption', o, o.label);
+}
+
+// ---------- School Calendar (Academic Years) ----------
+const academicYears = ref([]);
+const loadingAy = ref(false);
+const showAyModal = ref(false);
+const ayError = ref('');
+const savingAy = ref(false);
+const AY_GROUPS = [
+  { key: 'year',       label: 'Academic Year' },
+  { key: 'first_sem',  label: '1st Semester' },
+  { key: 'second_sem', label: '2nd Semester' },
+  { key: 'midyear',    label: 'Midyear' },
+];
+const AY_FIELDS = AY_GROUPS.flatMap(g => [g.key + '_start', g.key + '_end']);
+const emptyAy = () => ({ id: null, start_year: '', ...Object.fromEntries(AY_FIELDS.map(f => [f, ''])) });
+const ayForm = ref(emptyAy());
+
+function ayDefaults(y) {
+  return {
+    year_start: `${y}-08-01`,       year_end: `${y + 1}-07-31`,
+    first_sem_start: `${y}-08-01`,  first_sem_end: `${y}-12-31`,
+    second_sem_start: `${y + 1}-01-01`, second_sem_end: `${y + 1}-05-31`,
+    midyear_start: `${y + 1}-06-01`, midyear_end: `${y + 1}-07-31`,
+  };
+}
+function onAyYearInput() {
+  ayForm.value.start_year = String(ayForm.value.start_year ?? '').replace(/\D/g, '').slice(0, 4);
+  // Suggest the usual dates for a new academic year; the user can change them.
+  if (!ayForm.value.id && ayForm.value.start_year.length === 4) {
+    Object.assign(ayForm.value, ayDefaults(Number(ayForm.value.start_year)));
+  }
+}
+const ayValid = computed(() => String(ayForm.value.start_year).length === 4 && AY_FIELDS.every(f => ayForm.value[f]));
+
+function ayRange(a, b) {
+  const fmt = (str) => {
+    if (!str) return '';
+    const [y, m, d] = String(str).slice(0, 10).split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+  return `${fmt(a)} - ${fmt(b)}`;
+}
+
+async function fetchAcademicYears() {
+  loadingAy.value = true;
+  try {
+    const res = await axios.get(`${API_BASE}/management/academic-years`, authHeaders());
+    academicYears.value = res.data;
+  } catch (e) {
+    console.error(e);
+  } finally {
+    loadingAy.value = false;
+  }
+}
+
+function openAyModal(a) {
+  ayForm.value = a
+    ? { id: a.id, start_year: String(a.start_year), ...Object.fromEntries(AY_FIELDS.map(f => [f, String(a[f] || '').slice(0, 10)])) }
+    : emptyAy();
+  ayError.value = '';
+  snapshot('ay');
+  showAyModal.value = true;
+}
+
+async function saveAy() {
+  ayError.value = '';
+  savingAy.value = true;
+  try {
+    const payload = { ...ayForm.value, start_year: Number(ayForm.value.start_year) };
+    if (payload.id) {
+      await axios.put(`${API_BASE}/management/academic-years/${payload.id}`, payload, authHeaders());
+    } else {
+      await axios.post(`${API_BASE}/management/academic-years`, payload, authHeaders());
+    }
+    toast?.success('Academic year saved.');
+    showAyModal.value = false;
+    fetchAcademicYears();
+  } catch (e) {
+    const errs = e.response?.data?.errors;
+    ayError.value = errs ? Object.values(errs).flat()[0] : (e.response?.data?.message || 'Failed to save academic year.');
+  } finally {
+    savingAy.value = false;
+  }
+}
+
+// ---------- Delete Confirmation (styled modal, replacing browser confirm()) ----------
+const showSaveConfirm = ref(false);
+let pendingSave = null;
+// Edits (existing record) go through a confirm step; new records save directly.
+function askSave(isEdit, fn) {
+  if (!isEdit) { fn(); return; }
+  pendingSave = fn;
+  showSaveConfirm.value = true;
+}
+function confirmSave() {
+  showSaveConfirm.value = false;
+  const fn = pendingSave; pendingSave = null;
+  if (fn) fn();
+}
+
+// ---------- Deactivate / Archive / Reactivate (B431, B432) ----------
+const statusAsk = ref(null);
+const statusBusy = ref(false);
+const statusError = ref('');
+const STATUS_ACTION = { inactive: 'Deactivate', archived: 'Archive', active: 'Reactivate' };
+const STATUS_TEXT = {
+  inactive: (n) => ({ title: 'Deactivate?', confirm: 'Yes, Deactivate', message: `Deactivate <strong>"${escHtml(n)}"</strong>? It will be hidden from new forms but stays on existing records. You can reactivate it later.` }),
+  archived: (n) => ({ title: 'Archive?', confirm: 'Yes, Archive', message: `Archive <strong>"${escHtml(n)}"</strong>? It is retired and kept read-only for historical records.` }),
+  active:   (n) => ({ title: 'Reactivate?', confirm: 'Yes, Reactivate', message: `Reactivate <strong>"${escHtml(n)}"</strong>? It will be offered again on new forms.` }),
+};
+const STATUS_REFRESH = () => ({ colleges: fetchColleges, programs: fetchPrograms, departments: fetchDepartments, 'form-options': fetchFormOptions, 'academic-years': fetchAcademicYears });
+const STATUS_KIND_TAB = { colleges: 'college', programs: 'program', departments: 'department', 'academic-years': 'calendar' };
+const STATUS_USAGE_PATH = { colleges: 'colleges', programs: 'programs', departments: 'departments', 'form-options': 'form-options', 'academic-years': 'academic-years' };
+
+function tabOfKind(kind, item) {
+  if (kind === 'form-options') return item.category === 'referral_type' ? 'wellness' : item.category === 'act_of_misconduct' ? 'disciplinary' : 'sources';
+  return STATUS_KIND_TAB[kind];
+}
+const statusReasons = computed(() => {
+  const a = statusAsk.value;
+  return a ? (MANAGEMENT_STATUS_REASONS[tabOfKind(a.kind, a.item)]?.[a.status] || []) : [];
+});
+
+const linkList = (links) => {
+  const parts = Object.entries(links || {}).filter(([, n]) => n > 0).map(([what, n]) => `${n} ${n === 1 ? what.replace(/s$/, '') : what}`);
+  if (!parts.length) return '';
+  return parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0];
+};
+
+async function askStatus(kind, item, name, status) {
+  statusError.value = '';
+  const ask = { kind, item, status, blocked: '', ...STATUS_TEXT[status](name) };
+  // The current term can't be deactivated or archived until another is set as current.
+  if (kind === 'academic-years' && item.is_current && status !== 'active') {
+    ask.blocked = 'This is the current term. Set another term as current first.';
+  }
+  // Show how many records still use the item (Deactivate and Archive); Archive is refused while any do.
+  if (status !== 'active') {
+    try {
+      const res = await axios.get(`${API_BASE}/management/${STATUS_USAGE_PATH[kind]}/${item.id}/usage`, authHeaders());
+      const list = linkList(res.data);
+      if (list) {
+        ask.message += `<br><br>Linked records: <strong>${escHtml(list)}</strong>.`;
+        if (status === 'archived' && kind !== 'academic-years') ask.blocked = `This item is used by ${list}, so it cannot be archived. Deactivate it instead, or reassign those records first.`;
+      } else {
+        ask.message += '<br><br>No linked records.';
+      }
+    } catch (e) { /* the server checks again */ }
+  }
+  // Reactivating: show why it was deactivated or archived before (B487).
+  if (status === 'active') {
+    try {
+      const res = await axios.get(`${API_BASE}/management/${STATUS_USAGE_PATH[kind]}/${item.id}/last-status-change`, authHeaders());
+      const d = res.data;
+      if (d?.found) {
+        const when = d.at ? new Date(d.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+        const verb = d.action === 'archived' ? 'Archived' : 'Deactivated';
+        ask.message += `<br><br><strong>${verb}${when ? ' on ' + escHtml(when) : ''}${d.by ? ' by ' + escHtml(d.by) : ''}.</strong><br>Reason: ${escHtml(d.reason || 'Not recorded')}${d.note ? `<br>Note: ${escHtml(d.note)}` : ''}`;
+      }
+    } catch (e) { /* optional context only */ }
+  }
+  statusAsk.value = ask;
+}
+
+async function doStatus({ reason, note }) {
+  const a = statusAsk.value;
+  if (!a || statusBusy.value) return;
+  statusBusy.value = true;
+  statusError.value = '';
+  try {
+    await axios.post(`${API_BASE}/management/${a.kind}/${a.item.id}/status`, { status: a.status, reason, note: note || null, version: a.item.updated_at || null }, authHeaders());
+    toast?.success(a.status === 'active' ? 'Reactivated.' : a.status === 'archived' ? 'Archived.' : 'Deactivated.');
+    statusAsk.value = null;
+    STATUS_REFRESH()[a.kind]();
+  } catch (e) {
+    const d = e.response?.data;
+    statusError.value = d?.errors?.linked?.[0] || d?.errors?.reason?.[0] || d?.errors?.note?.[0] || d?.errors?.status?.[0] || d?.message || 'Please try again.';
+  } finally {
+    statusBusy.value = false;
+  }
+}
+
+const confirmAction = inject('confirmAction', null);
+async function setCurrentTerm(a) {
+  const label = `${a.start_year}-${a.start_year + 1}`;
+  if (confirmAction && !(await confirmAction({ title: 'Set as current term?', message: `A.Y. ${label} will become the current term and be used by default for reports. Only one term can be current at a time.`, confirmText: 'Yes, set as current', cancelText: 'Cancel', danger: false }))) return;
+  try {
+    await axios.post(`${API_BASE}/management/academic-years/${a.id}/current`, { version: a.updated_at || null }, authHeaders());
+    toast?.success(`A.Y. ${label} is now the current term.`);
+    fetchAcademicYears();
+  } catch (e) {
+    toast?.error(e.response?.data?.message || 'Could not set the current term.');
+  }
+}
+
+// Search + status filter shared by the list tabs.
+const mgSearch = ref('');
+const mgStatus = ref('all');
+function resetMgFilter() { mgSearch.value = ''; mgStatus.value = 'all'; }
+function visibleRows(list, key) {
+  const q = mgSearch.value.trim().toLowerCase();
+  return (list || []).filter(r =>
+    (mgStatus.value === 'all' || (r.status || 'active') === mgStatus.value) &&
+    (!q || String(r[key] ?? '').toLowerCase().includes(q)));
+}
+
+// "Discard your changes?" - asked when a form is closed with unsaved input.
+const snapshots = {};
+const FORM_OF = () => ({ college: collegeForm, program: programForm, department: departmentForm, formOption: formOptionForm, ay: ayForm });
+const FLAG_OF = () => ({ college: showCollegeModal, program: showProgramModal, department: showDepartmentModal, formOption: showFormOptionModal, ay: showAyModal });
+function snapshot(kind) { snapshots[kind] = JSON.stringify(FORM_OF()[kind].value); }
+async function closeModal(kind) {
+  const dirty = JSON.stringify(FORM_OF()[kind].value) !== snapshots[kind];
+  if (dirty && confirmDiscard && !(await confirmDiscard())) return;
+  FLAG_OF()[kind].value = false;
+}
+
+const showDeleteConfirm = ref(false);
+const deleteTarget = ref(null);
+const deleteKind    = ref('');
+const deleteName    = ref('');
+const deleting      = ref(false);
+
+const capFirst = (v) => String(v ?? '').replace(/^(\s*)(\p{L})/u, (m, sp, ch) => sp + ch.toUpperCase());
+const deleteBlocked = ref('');
+const deleteError   = ref('');
+const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const deleteMessage = computed(() => `Delete <strong>"${escHtml(deleteName.value)}"</strong>? This cannot be undone.`);
+
+// Which reason list applies: the Management tab the record lives on.
+const deleteTab = computed(() => {
+  if (deleteKind.value === 'formOption') {
+    const cat = deleteTarget.value?.category;
+    return cat === 'referral_type' ? 'wellness' : cat === 'act_of_misconduct' ? 'disciplinary' : 'sources';
+  }
+  if (deleteKind.value === 'academicYear') return 'calendar';
+  return deleteKind.value;
+});
+const deleteReasons = computed(() => MANAGEMENT_DELETE_REASONS[deleteTab.value] || MANAGEMENT_DELETE_REASONS.sources);
+
+const DELETE_PATHS = { college: 'colleges', program: 'programs', department: 'departments', academicYear: 'academic-years', formOption: 'form-options' };
+const DELETE_NOUN  = { college: 'college', program: 'program', department: 'department', academicYear: 'entry', formOption: 'option' };
+
+async function openDeleteConfirm(kind, target, name) {
+  deleteKind.value   = kind;
+  deleteTarget.value = target;
+  deleteName.value   = name;
+  deleteBlocked.value = '';
+  deleteError.value   = '';
+
+  // Look up what still uses the record so the admin sees it before choosing a reason.
+  if (kind === 'academicYear' && target.is_current) {
+    deleteBlocked.value = 'This is the current term. Set another term as current first.';
+  } else {
+    try {
+      const res = await axios.get(`${API_BASE}/management/${DELETE_PATHS[kind]}/${target.id}/usage`, authHeaders());
+      const parts = Object.entries(res.data || {}).filter(([, n]) => n > 0).map(([what, n]) => `${n} ${n === 1 ? what.replace(/s$/, '') : what}`);
+      if (parts.length) {
+        const list = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0];
+        deleteBlocked.value = kind === 'academicYear'
+          ? `This term has ${list} dated within it, so it cannot be deleted. Archive it instead to keep the history.`
+          : `This ${DELETE_NOUN[kind]} is used by ${list}. Reassign or deactivate them first.`;
+      }
+    } catch (e) { /* the server checks again on delete */ }
+  }
+  showDeleteConfirm.value = true;
+}
+
+async function doConfirmedDelete({ reason, note }) {
+  const kind = deleteKind.value;
+  const target = deleteTarget.value;
+  if (!target || deleting.value) return;
+  deleting.value = true;
+  deleteError.value = '';
+  try {
+    await axios.delete(`${API_BASE}/management/${DELETE_PATHS[kind]}/${target.id}`, {
+      ...authHeaders(),
+      data: { reason, note: note || null, version: target.updated_at || null },
+    });
+    toast?.success('Deleted.');
+    ({ college: fetchColleges, program: fetchPrograms, department: fetchDepartments, academicYear: fetchAcademicYears, formOption: fetchFormOptions })[kind]();
+    showDeleteConfirm.value = false;
+  } catch (e) {
+    const d = e.response?.data;
+    deleteError.value = d?.errors?.linked?.[0] || d?.errors?.reason?.[0] || d?.errors?.note?.[0] || d?.message || 'Failed to delete.';
+  } finally {
+    deleting.value = false;
+  }
+}
+
+// ---------- Document Headers (QF-OSS-01 Referral Slip, QF-OSS-03 Feedback Slip, QF-OSS-GCU-01 SIF) ----------
+const referralDoc = ref({ revision_no: '', effectivity_date: '', ctrl_no_year: '', ctrl_no_term: '1' });
+const feedbackDoc = ref({ revision_no: '', effectivity_date: '', ctrl_no_year: '', ctrl_no_term: '1' });
+const sifDoc      = ref({ revision_no: '', effectivity_date: '', ctrl_no_year: '', ctrl_no_term: '1' });
+const tmduSlipDoc = ref({ revision_no: '', effectivity_date: '', ctrl_no_year: '', ctrl_no_term: '' });
+const admissionDoc = ref({ revision_no: '', effectivity_date: '', ctrl_no_year: '', ctrl_no_term: '1' });
+const savingDoc = ref({ referral: false, feedback: false, sif: false, tmduSlip: false, admission: false });
+const docError  = ref({ referral: '', feedback: '', sif: '', tmduSlip: '', admission: '' });
+
+function toDateInput(date) {
+  return date ? new Date(date).toISOString().slice(0, 10) : '';
+}
+
+async function fetchDocSettings(code, target) {
+  try {
+    const res = await axios.get(`${API_BASE}/document-settings/${code}`, authHeaders());
+    target.value = {
+      revision_no:      res.data.revision_no || '01',
+      effectivity_date: toDateInput(res.data.effectivity_date),
+      ctrl_no_year:     res.data.ctrl_no_year || '',
+      ctrl_no_term:     res.data.ctrl_no_term || '1',
+    };
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function saveDocSettings(code, form, key) {
+  docError.value[key] = '';
+  savingDoc.value[key] = true;
+  try {
+    await axios.put(`${API_BASE}/document-settings/${code}`, form.value, authHeaders());
+    toast?.success('Document header updated.');
+  } catch (e) {
+    docError.value[key] = e.response?.data?.message || 'Failed to update document header.';
+  } finally {
+    savingDoc.value[key] = false;
+  }
+}
+
+
+// Preview, then save as a NEW version (older versions are kept; see Version History).
+const docPreview = ref(null);
+const versionsFor = ref(null);
+function openDocPreview(code, formRef, key, label) {
+  const f = { ...formRef.value };
+  const term = { '1': '1', '2': '2', 'S': 'S' }[f.ctrl_no_term] || '';
+  const ctrl = f.ctrl_no_year ? `${f.ctrl_no_year}${term ? '-' + term : ''}` : '';
+  docError.value[key] = '';
+  docPreview.value = { code, formRef, key, label, form: f, ctrl, error: '' };
+}
+async function confirmDocPreview() {
+  const d = docPreview.value; if (!d) return;
+  await saveDocSettings(d.code, d.formRef, d.key);
+  if (docError.value[d.key]) { d.error = docError.value[d.key]; return; }
+  docPreview.value = null;
+}
+function openVersions(code, label, target) { versionsFor.value = { code, label, target }; }
+function reloadDoc(target, code) { fetchDocSettings(code, target); }
+
+// Called from the template - wrapped so the ref itself (not its auto-unwrapped
+// value) reaches saveDocSettings, which needs the ref to read form.value.
+function saveReferralDoc() { return saveDocSettings('QF-OSS-01', referralDoc, 'referral'); }
+function saveFeedbackDoc() { return saveDocSettings('QF-OSS-03', feedbackDoc, 'feedback'); }
+function saveSifDoc()      { return saveDocSettings('QF-OSS-GCU-01', sifDoc, 'sif'); }
+function saveAdmissionDoc() { return saveDocSettings('QF-OSS-GCU-09', admissionDoc, 'admission'); }
+function saveTmduSlipDoc() { return saveDocSettings('QF-TMDU-02', tmduSlipDoc, 'tmduSlip'); }
+
+async function fetchTmduSlipDoc() {
+  try {
+    const res = await axios.get(`${API_BASE}/document-settings/QF-TMDU-02`, authHeaders());
+    tmduSlipDoc.value = {
+      revision_no:      res.data.revision_no || '00',
+      effectivity_date: toDateInput(res.data.effectivity_date),
+      ctrl_no_year:     res.data.ctrl_no_year || '',
+      ctrl_no_term:     res.data.ctrl_no_term || '',
+    };
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// FormOptionTable - small local render-function component to avoid repeating
+// the same table markup three times (Wellness / Disciplinary / Sources).
+const STATUS_LABELS = { active: 'Active', inactive: 'Deactivated', archived: 'Archived' };
+const statusLabel = (st) => STATUS_LABELS[st || 'active'] || 'Active';
+const statusStyle = (st) => (st || 'active') === 'active'
+  ? 'background:var(--mist);color:var(--moss)'
+  : st === 'archived' ? 'background:var(--cloud);color:var(--stone)' : 'background:var(--amber-lt);color:var(--amber)';
+
+const FormOptionTable = {
+  props: ['loading', 'options', 'showUnit'],
+  emits: ['edit', 'delete', 'status'],
+  setup(props, { emit }) {
+    return () => {
+      if (props.loading) {
+        return h('div', { style: 'text-align:center;padding:44px' }, [
+          h('div', { style: 'width:24px;height:24px;border:2px solid var(--mint);border-top-color:var(--moss);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto' }),
+        ]);
+      }
+      if (!props.options.length) {
+        return h('div', { class: 'empty-state' }, [
+          h('h3', 'No options yet'),
+          h('p', 'Add one to get started.'),
+        ]);
+      }
+      const headerCells = [h('th', 'ID'), h('th', 'Label')];
+      if (props.showUnit) headerCells.push(h('th', 'Unit'));
+      headerCells.push(h('th', 'Stored Value'), h('th', 'Status'), h('th'));
+
+      return h('div', { class: 'ts' }, [
+        h('table', { class: 'itable' }, [
+          h('thead', h('tr', headerCells)),
+          h('tbody', props.options.map(o => {
+            const cells = [
+              h('td', { style: 'font-family:var(--mono);font-size:12px' }, o.id),
+              h('td', o.label),
+            ];
+            if (props.showUnit) {
+              cells.push(h('td', o.unit
+                ? h('span', { class: 'ibadge', style: o.unit === 'GCU' ? 'background:var(--mist);color:var(--moss)' : 'background:var(--blue-lt);color:var(--blue)' }, o.unit)
+                : h('span', { style: 'color:var(--fog);font-size:12px' }, '-')));
+            }
+            cells.push(
+              h('td', { style: 'font-family:var(--mono);font-size:12px;color:var(--fog)' }, o.value),
+              h('td', h('span', { class: 'ibadge', style: statusStyle(o.status) }, statusLabel(o.status))),
+              h('td', h('div', { style: 'display:flex;gap:6px;justify-content:flex-end' }, [
+                h('button', { class: 'ibtn ibtn-o ibtn-sm', disabled: (o.status || 'active') !== 'active', title: (o.status || 'active') !== 'active' ? 'Reactivate to edit. Deactivated and archived records are read-only.' : '', onClick: () => emit('edit', o) }, 'Edit'),
+                o.status === 'active' ? h('button', { class: 'ibtn ibtn-o ibtn-sm', onClick: () => emit('status', o, 'inactive') }, 'Deactivate') : null,
+                o.status !== 'archived' ? h('button', { class: 'ibtn ibtn-o ibtn-sm', onClick: () => emit('status', o, 'archived') }, 'Archive') : null,
+                o.status !== 'active' ? h('button', { class: 'ibtn ibtn-p ibtn-sm', onClick: () => emit('status', o, 'active') }, 'Reactivate') : null,
+                h('button', { class: 'ibtn ibtn-sm', style: 'background:var(--red-lt);color:var(--red);border:1.5px solid #f5c0c0', onClick: () => emit('delete', o) }, 'Delete'),
+              ])),
+            );
+            return h('tr', { key: o.id }, cells);
+          })),
+        ]),
+      ]);
+    };
+  },
+};
+
+// Switch tabs and refetch whichever section's data the newly active tab needs.
+function selectTab(key) {
+  activeTab.value = key;
+  resetMgFilter();
+  if (TAB_CATEGORY[key]) fetchFormOptions();
+  if (key === 'calendar') fetchAcademicYears();
+}
+
+onMounted(async () => {
+  await fetchColleges();
+  fetchPrograms();
+  fetchDepartments();
+  fetchDocSettings('QF-OSS-01', referralDoc);
+  fetchDocSettings('QF-OSS-03', feedbackDoc);
+  fetchDocSettings('QF-OSS-GCU-01', sifDoc);
+  fetchDocSettings('QF-OSS-GCU-09', admissionDoc);
+  if (!isAdmin.value) fetchTmduSlipDoc();
+});
+</script>

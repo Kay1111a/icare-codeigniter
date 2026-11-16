@@ -1,0 +1,10 @@
+vendor
+node_modules
+.env
+.git
+writable/*
+storage/logs/*
+storage/framework/*
+storage/app/*
+public/build
+coverage

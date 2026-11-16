@@ -1,0 +1,239 @@
+<template>
+  <div class="auth-page" style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--snow);padding:20px">
+    <div class="auth-panel" style="background:#fff;border-radius:var(--r-lg);box-shadow:var(--sh-lg);padding:36px 32px;width:100%" :style="{ maxWidth: '440px' }">
+      <!-- Bug (10/25/2026, B632): the back arrow and "Change sign-in type"
+           were two separate controls that did the exact same thing (both
+           went to login-choice) - one left-aligned link instead. -->
+      <div style="margin-bottom:16px">
+        <router-link :to="{ name: 'login-choice' }" style="font-size:13px;color:var(--stone);display:inline-flex;align-items:center;gap:6px;text-decoration:none">
+          <svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;flex-shrink:0"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          Change sign-in type
+        </router-link>
+      </div>
+
+      <AuthBrand subtitle="Student Portal" />
+
+      <!-- The sign-in form is shown right away. The Data Privacy Notice is a
+           link rather than a full-page block shown up front; it's only
+           required - as a modal the person must scroll, tick and accept -
+           the first time they click Sign In each visit. -->
+      <div>
+        <div v-if="error" style="background:var(--red-lt);border:1px solid #f5c0c0;color:var(--red);padding:10px 12px;border-radius:var(--r-sm);font-size:13px;margin-bottom:14px">
+          {{ error }}
+        </div>
+
+        <form @submit.prevent="onSignInClick">
+            <div style="margin-bottom:14px">
+              <label class="ifl">Student ID</label>
+              <input
+                v-model="form.student_id"
+                class="ifi"
+                placeholder="e.g. 2302021"
+                required
+                inputmode="numeric"
+                maxlength="10"
+                pattern="[0-9]*"
+                :style="error ? 'border-color:var(--red);border-width:1.5px' : ''"
+                @input="onStudentIdInput"
+              />
+            </div>
+            <div style="margin-bottom:18px">
+            <label class="ifl">Password</label>
+            <div style="position:relative">
+                <input
+                    v-model="form.password"
+                    :type="showPassword ? 'text' : 'password'"
+                    class="ifi"
+                    placeholder="Enter your password"
+                    required
+                    :style="`padding-right:40px;${error ? 'border-color:var(--red);border-width:1.5px' : ''}`"
+                    @keyup="checkCapsLock"
+                    @input="onFieldEdit"
+                  />
+                <button
+                  type="button"
+                  @click="showPassword = !showPassword"
+                  style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--fog);padding:4px;display:flex;align-items:center"
+                >
+                  <svg v-if="!showPassword" viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                  <svg v-if="showPassword" viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                    <line x1="1" y1="1" x2="23" y2="23"/>
+                  </svg>
+                </button>
+              </div>
+              <div v-if="capsLockOn" style="font-size:11px;color:var(--amber);margin-top:4px">⚠ Caps Lock is on</div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-6px 0 14px">
+              <label class="remember" title="Fills in your Student ID next time and keeps you signed in after closing the browser. Leave it off on a shared computer.">
+                <input v-model="rememberMe" type="checkbox" /> Remember me
+              </label>
+              <router-link :to="{ name: 'forgot-password', query: { type: 'student' } }" style="font-size:12px;color:var(--moss)">Forgot password?</router-link>
+            </div>
+            <button type="submit" class="ibtn ibtn-p" style="width:100%;justify-content:center" :disabled="loading">
+              <span v-if="loading" style="width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:inline-block"></span>
+              {{ loading ? 'Signing in...' : 'Sign In' }}
+            </button>
+            <div style="text-align:center;margin-top:10px;font-size:11.5px;color:var(--fog)">
+              By signing in, you agree to the
+              <button type="button" class="link-btn" @click.stop="openConsent(false)">Data Privacy Notice and Consent Authorization</button>.
+            </div>
+          </form>
+        </div>
+
+      <div class="change-type">First time here? <router-link :to="{ name: 'student-register' }">Register with your Student ID</router-link></div>
+      <LoginHelp />
+      <!-- The system's full name sits at the bottom, as on BSU Personnel sign-in, so the top stays light. -->
+      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--fog);opacity:.8">
+        iCARE: An Integrated Case Management System for Benguet State University-Office of Student Services
+      </div>
+    </div>
+
+    <!-- Data Privacy Notice - a link to read it any time (openConsent(false)),
+         and a required step - must scroll, tick, Continue - the first time
+         Sign In is clicked each visit (openConsent(true) via onSignInClick). -->
+    <!-- v-show, not v-if: ConsentGate stays mounted (just hidden) from page
+         load so its "already agreed on this device" check runs immediately,
+         letting Sign In skip the modal entirely when it's already been
+         accepted here before - see ConsentGate.vue's onMounted. -->
+    <div v-show="showConsent" style="position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:80;display:flex;align-items:center;justify-content:center;padding:20px" @click.self="closeConsent">
+      <div class="auth-panel" style="background:#fff;border-radius:var(--r-lg);max-width:480px;width:100%;max-height:90vh;overflow-y:auto;padding:28px 26px;box-shadow:var(--sh-lg)">
+        <ConsentGate
+          type="student"
+          :visible="showConsent"
+          checkbox-label="I have read and agree to the Data Privacy Notice and Consent Authorization above."
+          @accept="onConsentAccept"
+        >
+          <h3>Data Privacy Notice</h3>
+          <p>
+            Pursuant to the Data Privacy Act of 2012, its Implementing Rules and Regulations (IRR), and the Benguet State University (BSU) Data Privacy Policy, the Office of Student Services (OSS), including the Student Discipline Unit (SDU), Guidance and Counseling Unit (GCU), and Testing and Materials Development Unit (TMDU) at the La Trinidad Campus, is committed to keeping all sensitive personal information collected from students with the utmost confidentiality.
+          </p>
+          <p>
+            Personal information is collected, accessed, used, and disclosed strictly on a "need to know basis" and only as reasonably required. Confidential information will not be communicated within or outside the University except to authorized personnel. Furthermore, only authorized hardware, software, and equipment shall be used in accessing, processing, and transmitting your personal data.
+          </p>
+
+          <h3>Student's Agreement, Consent, and Authorization</h3>
+          <p>
+            I have read and understood the Data Privacy Notice of Benguet State University (BSU). I hereby grant my full consent to the OSS-SDU, OSS-GCU, and OSS-TMDU to collect, process, and utilize necessary and relevant personal data through this medium for official university support purposes.
+          </p>
+          <p>
+            I understand that the aforementioned units will abide by the data privacy policies, except in cases mandated by law or outside of institutional control. By proceeding, I authorize the secure handling of my information across these designated student support units.
+          </p>
+        </ConsentGate>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import AuthBrand from '../components/AuthBrand.vue';
+import ConsentGate from '../components/ConsentGate.vue';
+import LoginHelp from '../components/LoginHelp.vue';
+import { consumeConsentSkip } from '../utils/consentSkip';
+import { ref } from 'vue';
+import { useRouter } from 'vue-router';
+import axios from 'axios';
+import { applyRememberMe, rememberedId } from '../utils/session';
+
+const router = useRouter();
+const loading = ref(false);
+const error   = ref('');
+const showPassword = ref(false);
+const capsLockOn = ref(false);
+
+// The Data Privacy Notice is a link the student can read any time
+// (openConsent(false)), and is only required - as a modal they must scroll,
+// tick and accept - the first time they click Sign In each visit to this
+// page (openConsent(true), via onSignInClick). Coming back here right after
+// accepting it elsewhere (e.g. from "Forgot password") skips that prompt.
+const consentGiven = ref(consumeConsentSkip('student'));
+const showConsent  = ref(false);
+const pendingLogin = ref(false);
+
+function openConsent(gatingLogin) {
+  pendingLogin.value = gatingLogin;
+  showConsent.value = true;
+}
+function closeConsent() {
+  showConsent.value = false;
+  pendingLogin.value = false;
+}
+function onConsentAccept() {
+  consentGiven.value = true;
+  showConsent.value = false;
+  if (pendingLogin.value) {
+    pendingLogin.value = false;
+    handleLogin();
+  }
+}
+
+function onSignInClick() {
+  if (!consentGiven.value) {
+    openConsent(true);
+    return;
+  }
+  handleLogin();
+}
+
+// A Student ID remembered on this browser is filled in, with the box already ticked.
+const form = ref({ student_id: rememberedId('student'), password: '' });
+const rememberMe = ref(!!rememberedId('student'));
+
+const API_BASE = `${import.meta.env.VITE_API_URL || ''}/api`;
+
+async function handleLogin() {
+  error.value = '';
+  loading.value = true;
+  try {
+    const res = await axios.post(`${API_BASE}/student/login`, { ...form.value, consent_accepted: true });
+    localStorage.setItem('student_token', res.data.token);
+    localStorage.setItem('student', JSON.stringify(res.data.student));
+    applyRememberMe('student', rememberMe.value, form.value.student_id);
+    router.push({ name: 'student-dashboard' });
+  } catch (e) {
+    const data = e.response?.data || {};
+    const code = data.error || data.code;
+
+    const MESSAGES = {
+      invalid_student_id: 'No student account found with that Student ID.',
+      student_not_found:  'No student account found with that Student ID.',
+      invalid_password:   'Incorrect password. Please try again.',
+      wrong_password:     'Incorrect password. Please try again.',
+      account_inactive:   'This account is not yet activated. Please contact the Office of Student Services.',
+      account_locked:     'This account has been locked. Please contact the Office of Student Services.',
+    };
+
+    error.value = e.response?.status === 429
+      ? (data.locked ? data.message : 'Too many attempts. Please wait a minute and try again.')
+      : MESSAGES[code]
+      || data.message
+      || 'Invalid Student ID or password.';
+  } finally {
+    loading.value = false;
+  }
+}
+
+function onStudentIdInput(e) {
+  // strip any non-digit and enforce max length
+  form.value.student_id = e.target.value.replace(/\D/g, '').slice(0, 10);
+  if (error.value) error.value = '';
+}
+
+function onFieldEdit() {
+  if (error.value) error.value = '';
+}
+
+function checkCapsLock(e) {
+  capsLockOn.value = e.getModifierState && e.getModifierState('CapsLock');
+}
+</script>
+
+<style scoped>
+.change-type { text-align: center; margin-top: 16px; font-size: 12.5px; }
+.change-type a { color: var(--moss); font-weight: 600; }
+.link-btn { background: none; border: none; padding: 0; color: var(--moss); font-weight: 600; text-decoration: underline; cursor: pointer; font-size: inherit; font-family: inherit; }
+</style>

@@ -1,0 +1,121 @@
+{
+  "validated_date": "2026-11-08",
+  "timezone": "Asia/Manila",
+  "source_zip": "icare-main.zip",
+  "source_sha256": "2f7d0e7b5396f963c1d28ffca5c594b7a4eb02d49308a3d399255a783057cbf2",
+  "original_backend": {
+    "tests": 455,
+    "assertions": 1695,
+    "failures": 0,
+    "errors": 0
+  },
+  "converted_backend": {
+    "tests": 463,
+    "assertions": 1726,
+    "failures": 0,
+    "errors": 0
+  },
+  "frontend": {
+    "tests": 36,
+    "files": 3,
+    "passed": true,
+    "build": "passed"
+  },
+  "mariadb": {
+    "database": "MariaDB 10.11.7",
+    "migrations": 132,
+    "second_run": "idempotent",
+    "admin_created": true,
+    "legacy_ledger_adopted": true
+  },
+  "http_checks": [
+    {
+      "method": "HEAD",
+      "path": "/health",
+      "status": 200
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/me",
+      "status": 401
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/build/assets/index-CVPBUMsg.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "status": 401
+    },
+    {
+      "method": "POST",
+      "path": "/api/login",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard",
+      "status": 403
+    },
+    {
+      "method": "PUT",
+      "path": "/api/me/password",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/logout",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "status": 401
+    },
+    {
+      "method": "GET",
+      "path": "/api/no-such-endpoint",
+      "status": 404
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/login",
+      "status": 204
+    }
+  ],
+  "versions": {
+    "codeigniter4/framework": "v4.7.6",
+    "dompdf/dompdf": "v3.1.6",
+    "illuminate/database": "v12.70.2",
+    "illuminate/mail": "v12.70.2",
+    "phpoffice/phpspreadsheet": "5.10.0"
+  },
+  "limitations": [
+    "Full backend suite uses SQLite; MariaDB checks cover migrations, ledger adoption and initial account creation.",
+    "Live SMTP/Cloudinary and production data were not provided or tested.",
+    "Docker, Windows/Apache and browser E2E deployment were not executed.",
+    "Standalone Eloquent/Illuminate components remain; this is not an all-native CodeIgniter Model rewrite."
+  ]
+}
